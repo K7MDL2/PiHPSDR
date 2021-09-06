@@ -307,7 +307,7 @@ static void find_current_cmd() {
   struct desc *cmd;
   cmd=MidiCommandsTable[thisNote];
   while(cmd!=NULL) {
-    if((cmd->channel==thisChannel) && cmd->type==thisType && cmd->action==thisAction) {
+    if((cmd->channel==thisChannel || cmd->channel == -1) && cmd->type==thisType && cmd->action==thisAction) {
       break;
     }
     cmd=cmd->next;
@@ -687,6 +687,8 @@ static void update_cb(GtkButton *widget,gpointer user_data) {
   current_cmd->fr2   =thisFr2;
   current_cmd->vfr1  =thisVfr1;
   current_cmd->vfr2  =thisVfr2;
+
+  if (accept_any) current_cmd->channel=-1;
 
   switch(current_cmd->event) {
     case EVENT_NONE:
@@ -1358,7 +1360,24 @@ static int update(void *data) {
   return 0;
 }
 
-void NewMidiConfigureEvent(enum MIDIevent event, int channel, int note, int val) {
+typedef struct MYEVENT {
+  enum MIDIevent event;
+  int            channel;
+  int            note;
+  int            val;
+} myevent;
+
+int ProcessNewMidiConfigureEvent(void * data) {
+
+  //
+  // This is now running in the GTK idle queue
+  //
+
+  myevent *mydata = (myevent *) data;
+  enum MIDIevent event=mydata->event;
+  int  channel = mydata->channel;
+  int  note = mydata->note;
+  int  val = mydata->val;
 
   gboolean valid;
   char *str_event;
@@ -1371,6 +1390,7 @@ void NewMidiConfigureEvent(enum MIDIevent event, int channel, int note, int val)
   gint tree_channel;
   gint tree_note;
 
+   g_free(data);
   //g_print("%s: event=%d channel=%d note=%d val=%d\n", __FUNCTION__,event,channel,note,val);
 
   if(event==thisEvent && channel==thisChannel && note==thisNote) {
@@ -1378,7 +1398,7 @@ void NewMidiConfigureEvent(enum MIDIevent event, int channel, int note, int val)
     thisVal=val;
     if(val<thisMin) thisMin=val;
     if(val>thisMax) thisMax=val;
-    g_idle_add(update,GINT_TO_POINTER(UPDATE_CURRENT));
+    update(GINT_TO_POINTER(UPDATE_CURRENT));
   } else {
     //g_print("%s: new or existing event\n",__FUNCTION__);
     thisEvent=event;
@@ -1458,23 +1478,26 @@ void NewMidiConfigureEvent(enum MIDIevent event, int channel, int note, int val)
             i++;
           }
 	  gtk_tree_view_set_cursor(GTK_TREE_VIEW(view),gtk_tree_model_get_path(model,&iter),NULL,FALSE);
-          g_idle_add(update,GINT_TO_POINTER(UPDATE_EXISTING));
-          return;
+          update(GINT_TO_POINTER(UPDATE_EXISTING));
+          return 0;
 	}
       }
 
       valid=gtk_tree_model_iter_next(model,&iter);
     }
     
-    //
-    // It is not guaranteed that update() will be executed before
-    // thisAction & friends are overwritten by the next incoming MIDI
-    // message. Therefore, we should allocate a data structure with
-    // all information therein that is needed by update() and pass
-    // a pointer.
-    //
-    g_idle_add(update,GINT_TO_POINTER(UPDATE_NEW));
-  }
+    update(GINT_TO_POINTER(UPDATE_NEW));
+   }
+   return 0;
+}
+ 
+void NewMidiConfigureEvent(enum MIDIevent event, int channel, int note, int val) {
+  myevent *data = g_new(myevent, 1);
+  data->event = event;
+  data->channel = channel;
+  data->note = note;
+  data->val = val;
+  g_idle_add(ProcessNewMidiConfigureEvent, data);
 }
 
 void midi_save_state() {
