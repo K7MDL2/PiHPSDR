@@ -187,7 +187,11 @@ static void rit_cb(GtkComboBox *widget,gpointer data) {
 }
 
 static void vfo_cb(GtkComboBox *widget,gpointer data) {
-  step=steps[gtk_combo_box_get_active(widget)];
+  int i=gtk_combo_box_get_active(widget);
+  if (i >= 0 && i < STEPS) {
+    vfo_set_stepsize(steps[i]);
+    g_idle_add(ext_vfo_update,NULL);
+  }
   g_idle_add(ext_vfo_update,NULL);
 }
 
