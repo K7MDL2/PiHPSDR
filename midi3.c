@@ -371,13 +371,12 @@ int DoTheRestOfTheMIDI(void *data) {
 	    break;
 	/////////////////////////////////////////////////////////// "CWSPEED"
 	case MIDI_ACTION_CWSPEED: // knob or wheel
+	    // speed between 1 and 60 wpm
             switch (type) {
               case MIDI_KNOB:
-		// speed between 5 and 35 wpm
-                new= (int) (5.0 + (double) val * 0.3);
+                new= (int) (1.5 + (double) val * 0.59);
                 break;
               case MIDI_WHEEL:
-		// here we allow from 1 to 60 wpm
                 new = cw_keyer_speed + val;
 		if (new <  1) new=1;
 		if (new > 60) new=60;
