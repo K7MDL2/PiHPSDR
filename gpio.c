@@ -1938,31 +1938,22 @@ static void encoder_changed(int action,int pos) {
     case ENCODER_RF_GAIN:
       value=adc[active_receiver->adc].gain;
       value+=(double)pos;
-      if(value<0.0) {
-        value=0.0;
-      } else if(value>100.0) {
-        value=100.0;
-      }
+      if(value<adc[active_receiver->adc].min_gain) value=adc[active_receiver->adc].min_gain;
+      if(value>adc[active_receiver->adc].max_gain) value=adc[active_receiver->adc].max_gain;
       set_rf_gain(active_receiver->id,value);
       break;
     case ENCODER_RF_GAIN_RX1:
       value=adc[receiver[0]->adc].gain;
       value+=(double)pos;
-      if(value<0.0) {
-        value=0.0;
-      } else if(value>100.0) {
-        value=100.0;
-      }
+      if(value<adc[receiver[0]->adc].min_gain) value=adc[receiver[0]->adc].min_gain;
+      if(value>adc[receiver[0]->adc].min_gain) value=adc[receiver[0]->adc].max_gain;
       set_rf_gain(0,value);
       break;
     case ENCODER_RF_GAIN_RX2:
       value=adc[receiver[1]->adc].gain;
       value+=(double)pos;
-      if(value<0.0) {
-        value=0.0;
-      } else if(value>71.0) {
-        value=71.0;
-      }
+      if(value<adc[receiver[1]->adc].min_gain) value=adc[receiver[1]->adc].min_gain;
+      if(value>adc[receiver[1]->adc].min_gain) value=adc[receiver[1]->adc].max_gain;
       set_rf_gain(1,value);
       break;
     case ENCODER_AGC_GAIN:
@@ -2016,19 +2007,11 @@ static void encoder_changed(int action,int pos) {
     case ENCODER_ATTENUATION:
       value=(double)adc[active_receiver->adc].attenuation;
       value+=(double)pos;
-      if(have_rx_gain) {
-        if(value<-12.0) {
-          value=-12.0;
-        } else if(value>48.0) {
-          value=48.0;
-        }
-      } else {
-        if(value<0.0) {
-          value=0.0;
-        } else if (value>31.0) {
-          value=31.0;
-        }	
-      }
+      if(value<0.0) {
+        value=0.0;
+      } else if (value>31.0) {
+        value=31.0;
+      }	
       set_attenuation_value(value);
       break;
     case ENCODER_MIC_GAIN:

@@ -197,27 +197,15 @@ int DoTheRestOfTheMIDI(void *data) {
 		break;
 	      case MIDI_WHEEL:
 		dnew=adc[active_receiver->adc].attenuation + val;
-                if(have_rx_gain) {
-                  if(dnew < -12.0) {
-                    dnew = -12.0;
-                  } else if(dnew > 48.0) {
-                    dnew=48.0;
-                  }
-                } else {
-                  if (dnew < 0.0) {
-                    dnew = 0.0;
-                  } else if (dnew > 31.0) {
-                    dnew = 31.0;
-                  }
+                if (dnew < 0.0) {
+                  dnew = 0.0;
+                } else if (dnew > 31.0) {
+                  dnew = 31.0;
                 }
                 set_attenuation_value(dnew);
 		break;
 	      case MIDI_KNOB:
-                if (have_rx_gain) {
-		  dnew = -12.0 + 0.6*val;
-                } else {
-                  dnew  = 0.31*val;
-                }
+                dnew  = 0.31*val;
                 set_attenuation_value(dnew);
 		break;
 	      default:
@@ -805,7 +793,7 @@ int DoTheRestOfTheMIDI(void *data) {
         case MIDI_ACTION_RF_GAIN: // knob or wheel supported
             switch (type) {
               case MIDI_KNOB:
-                dnew=val;
+                dnew=adc[active_receiver->id].min_gain+val*(adc[active_receiver->id].max_gain-adc[active_receiver->id].min_gain)*0.01;
                 break;
               case MIDI_WHEEL:
                 dnew=adc[active_receiver->id].gain+val;
@@ -815,8 +803,8 @@ int DoTheRestOfTheMIDI(void *data) {
                 dnew=0.0;
                 break;
             }
-            if (dnew <   0.0) dnew =   0.0;
-            if (dnew > 100.0) dnew = 100.0;
+            if (dnew > adc[active_receiver->id].max_gain) dnew=adc[active_receiver->id].max_gain;
+            if (dnew < adc[active_receiver->id].min_gain) dnew=adc[active_receiver->id].min_gain;
             set_rf_gain(active_receiver->id, dnew);
 	    break;
 	/////////////////////////////////////////////////////////// "RFPOWER"
