@@ -156,26 +156,6 @@ void i2c_init() {
   if(write_byte_data(0x04,0xFF)<0) return;
   if(write_byte_data(0x05,0xFF)<0) return;
 
-  // setup for an 10Mhz Ref on input Clk1
-  if(write_byte_data(0x10,0xc0)<0) return;  // Enable xtal and clock
-  if(write_byte_data(0x13,0x03)<0) return;  // Switch to clock
-  if(write_byte_data(0x10,0x40)<0) return;  // Enable clock input only, won't lock to master
-
-  // Output Divider 1
-  if(write_byte_data(0x2d,0x01)<0) return;  // Change top divider to 0x012
-  if(write_byte_data(0x2e,0x20)<0) return;
-  if(write_byte_data(0x22,0x03)<0) return;  // Change fractional divider to 0x3000000
-  if(write_byte_data(0x23,0x00)<0) return;
-  if(write_byte_data(0x24,0x00)<0) return;
-  if(write_byte_data(0x25,0x00)<0) return;
-
-  // PLL multiplier
-  if(write_byte_data(0x19,0x00)<0) return;  // Change fractional multiplier to 0x000000
-  if(write_byte_data(0x1A,0x00)<0) return;
-  if(write_byte_data(0x1B,0x00)<0) return;
-  if(write_byte_data(0x18,0x00)<0) return;  // Change top multiplier to 0x120. LSB first to prevent VCO > 2900MHz
-  if(write_byte_data(0x17,0x12)<0) return;
-
   // flush any interrupts
   int count=0;
   do {
