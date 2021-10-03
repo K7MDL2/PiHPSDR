@@ -496,7 +496,7 @@ int ext_agc_update(void *data) {
   if(active_receiver->agc>+AGC_LAST) {
     active_receiver->agc=0;
   }
-  set_agc(active_receiver, active_receiver->agc);
+  set_agc(active_receiver);
   g_idle_add(ext_vfo_update, NULL);
   return 0;
 }
@@ -672,7 +672,7 @@ int ext_remote_command(void *data) {
       RECEIVER *rx=receiver[agc_command->id];
       rx->agc=ntohs(agc_command->agc);
 g_print("AGC_COMMAND: set_agc id=%d agc=%d\n",rx->id,rx->agc);
-      set_agc(rx,rx->agc);
+      set_agc(rx);
       send_agc(client->socket,rx->id,rx->agc);
       g_idle_add(ext_vfo_update, NULL);
       }
