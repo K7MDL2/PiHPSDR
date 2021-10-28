@@ -638,7 +638,7 @@ static gint update_display(gpointer data) {
       if(active_receiver==rx) {
         rx->meter=GetRXAMeter(rx->id,smeter)+meter_calibration;
         // the three "unused" parameters are the TX rev, alc, and swr values
-        meter_update(rx,SMETER,rx->meter,0.0,0.0,0.0);
+        meter_update(rx,SMETER,rx->meter,0.0,0.0,0.0,0.0);
       }
       return TRUE;
     }
@@ -658,7 +658,7 @@ void receiver_remote_update_display(RECEIVER *rx) {
       }
       if(active_receiver==rx) {
         // the three "unused" parameters are the TX rev, alc, and swr values
-        meter_update(rx,SMETER,rx->meter,0.0,0.0,0.0);
+        meter_update(rx,SMETER,rx->meter,0.0,0.0,0.0,0.0);
       }
       g_mutex_unlock(&rx->display_mutex);
     }

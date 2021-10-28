@@ -763,6 +763,7 @@ static long long channel_freq(int chan) {
       }
     }
   }
+  freq+=calibration;
   return freq;
 }
 
@@ -1251,21 +1252,19 @@ void old_protocol_iq_samples(int isample,int qsample) {
   }
 }
 
-/*
-static void process_bandscope_buffer(char  *buffer) {
-}
-*/
-
 void ozy_send_buffer() {
 
 
   int txmode=get_tx_mode();
   int txvfo=get_tx_vfo();
   int i;
-  BAND *band;
+  int power;
   int num_hpsdr_receivers=how_many_receivers();
   int rx1channel = first_receiver_channel();
   int rx2channel = second_receiver_channel();
+
+  BAND *rxband=band_get_band(vfo[VFO_A].band);
+  BAND *txband=band_get_band(vfo[txvfo].band);
 
   output_buffer[SYNC0]=SYNC;
   output_buffer[SYNC1]=SYNC;
@@ -1328,10 +1327,8 @@ void ozy_send_buffer() {
     if(classE) {
       output_buffer[C2]|=0x01;
     }
-    band=band_get_band(vfo[VFO_A].band);
     if(isTransmitting()) {
-      band=band_get_band(vfo[txvfo].band);
-      output_buffer[C2]|=band->OCtx<<1;
+      output_buffer[C2]|=txband->OCtx<<1;
       if(tune) {
         if(OCmemory_tune_time!=0) {
           struct timeval te;
@@ -1345,7 +1342,7 @@ void ozy_send_buffer() {
         }
       }
     } else {
-      output_buffer[C2]|=band->OCrx<<1;
+      output_buffer[C2]|=rxband->OCrx<<1;
     }
 
     output_buffer[C3] = (receiver[0]->alex_attenuation) & 0x03;  // do not set higher bits
@@ -1509,9 +1506,7 @@ void ozy_send_buffer() {
         }
         break;
       case 3:
-        {
-        BAND *band=band_get_current_band();
-        int power=0;
+        power=0;
 //static int last_power=0;
 	//
 	// Some HPSDR apps for the RedPitaya generate CW inside the FPGA, but while
@@ -1530,23 +1525,23 @@ void ozy_send_buffer() {
             power=transmitter->drive_level;
           }
           if (device == DEVICE_HERMES_LITE2) {
-            //
-            // from the "intended" drive level power, calculate the
-            // next lower TX attenuation which can be from 0.0 to -7.5 dB
-            // in 0.5 dB steps, encode the step in a four-bit word and shift
-            // it to the upper 4 bits.
-            // we always use the att level that produces a little bit *less* attenuation
-            // than required, and down-scale the IQ samples in transmitter.c
-            //
-            // NOTE: this down-scaling does not occur when connecting a CW key to the HL2
-            //       and using "internal" CW, because in this case the IQ samples are
-            //       generated in the FPGA. A typical symptom is that the CW signals are
-            //       stronger than the "TUNE" signal, and in the case of very low drive slider
-            //       values they can be *much* stronger.
+	    //
+	    // from the "intended" drive level power, calculate the
+	    // next lower TX attenuation which can be from 0.0 to -7.5 dB
+	    // in 0.5 dB steps, encode the step in a four-bit word and shift
+	    // it to the upper 4 bits.
+	    // we always use the att level that produces a little bit *less* attenuation
+	    // than required, and down-scale the IQ samples in transmitter.c
+	    //
+	    // NOTE: this down-scaling does not occur when connecting a CW key to the HL2
+	    //       and using "internal" CW, because in this case the IQ samples are
+	    //       generated in the FPGA. A typical symptom is that the CW signals are
+	    //       stronger than the "TUNE" signal, and in the case of very low drive slider
+	    //       values they can be *much* stronger.
 	    //
 	    // NOTE: When using predistortion (PURESIGNAL), the IQ scaling must be switched off.
 	    //       In this case, the output  power can also be stronger than intended.
-            //
+	    //
             if (power > 0) {
               int hl2power = 15+(int)lround(ceil(40.0 * log10((double) power / 255.0)));
               if (hl2power < 0) hl2power=0;
@@ -1561,6 +1556,7 @@ void ozy_send_buffer() {
 //  last_power=power;
 //}
 
+       //fprintf(stderr,"%s: TXband=%s disablePA=%d\n",__FUNCTION__,txband->title,txband->disablePA);
 
 
         output_buffer[C0]=0x12;
@@ -1577,22 +1573,15 @@ void ozy_send_buffer() {
         if((filter_board==APOLLO) && tune) {
           output_buffer[C2]|=0x10;
         }
-        if (device==DEVICE_HERMES_LITE2) {
-          // do not set any Apollo/Alex bits,
-          // ADDR=0x09 bit 19 follows "PA enable" state
-          // ADDR=0x09 bit 20 follows "TUNE" state
-          // ADDR=0x09 bit 18 always cleared (external tuner enabled)
-          output_buffer[C2]= 0x00;
-          if (pa_enabled) output_buffer[C2] |= 0x08;
-          if (tune)       output_buffer[C2] |= 0x10;
-        } 
         if(band_get_current()==band6) {
           output_buffer[C3]=output_buffer[C3]|0x40; // Alex 6M low noise amplifier
         }
-        if(band->disablePA) {
-          output_buffer[C2]=output_buffer[C2]|0x40; // Manual Filter Selection
-          output_buffer[C3]=output_buffer[C3]|0x20; // bypass all RX filters
-          output_buffer[C3]=output_buffer[C3]|0x80; // disable Alex T/R relay
+        if (txband->disablePA || !pa_enabled) {
+          output_buffer[C3]|=0x80; // disable Alex T/R relay
+          if(isTransmitting()) {
+            output_buffer[C2]|=0x40; // Manual Filter Selection
+            output_buffer[C3]|=0x20; // bypass all RX filters
+          }
         }
 #ifdef PURESIGNAL
 	//
@@ -1631,6 +1620,16 @@ void ozy_send_buffer() {
 	  }
 	}
 #endif
+        if (device==DEVICE_HERMES_LITE2) {
+          // do not set any Apollo/Alex bits (ADDR=0x09 bits 0:23)
+          // ADDR=0x09 bit 19 follows "PA enable" state
+          // ADDR=0x09 bit 20 follows "TUNE" state
+          // ADDR=0x09 bit 18 always cleared (external tuner enabled)
+          output_buffer[C2]= 0x00;
+          output_buffer[C3]= 0x00;
+          output_buffer[C4]= 0x00;
+          if (pa_enabled || txband->disablePA) output_buffer[C2] |= 0x08;
+          if (tune)                            output_buffer[C2] |= 0x10;
         }
         command=4;
         break;

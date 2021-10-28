@@ -69,6 +69,7 @@ char *step_labels[]={"1Hz","10Hz","25Hz","50Hz","100Hz","250Hz","500Hz","1kHz","
 
 //
 // Move frequency f by n steps, adjust to multiple of step size
+// This should replace *all* divisions by the step size
 //
 #define ROUND(f,n)  (((f+step/2)/step + n)*step)
 
@@ -351,7 +352,7 @@ void vfo_xvtr_changed() {
 }
 
 void vfo_apply_mode_settings(int id) {
-  int m;
+  int m; 
 
   m=vfo[id].mode;
 
@@ -383,6 +384,7 @@ void vfo_apply_mode_settings(int id) {
 void vfo_band_changed(int id,int b) {
   BANDSTACK *bandstack;
 
+  //fprintf(stderr,"%s: %d\n",__FUNCTION__,b);
 #ifdef CLIENT_SERVER
   if(radio_is_remote) {
     send_band(client_socket,id,b);
@@ -406,7 +408,7 @@ void vfo_band_changed(int id,int b) {
     vfo[id].bandstack=bandstack->current_entry;
   }
 
-  BAND *band=band_get_band(b);
+  BAND *band=band_set_current(b);
   BANDSTACK_ENTRY *entry=&bandstack->entry[vfo[id].bandstack];
   vfo[id].band=b;
   vfo[id].frequency=entry->frequency;
@@ -740,7 +742,7 @@ void vfo_step(int steps) {
     if(vfo[id].ctun) {
       // don't let ctun go beyond end of passband
       long long frequency=vfo[id].frequency;
-      long long rx_low=ROUND(vfo[id].ctun_frequency,steps)+active_receiver->filter_low;
+      long long rx_low =ROUND(vfo[id].ctun_frequency,steps)+active_receiver->filter_low;
       long long rx_high=ROUND(vfo[id].ctun_frequency,steps)+active_receiver->filter_high;
       long long half=(long long)active_receiver->sample_rate/2LL;
       long long min_freq=frequency-half;
