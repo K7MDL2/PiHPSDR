@@ -253,7 +253,7 @@ int process_action(void *data) {
       }
       break;
     case AF_GAIN:
-      value=KnobOrWheel(a, active_receiver->volume, 0.0, 1.0, 0.01);
+      value=KnobOrWheel(a, active_receiver->volume, 0.0, 1.0, 0.04);
       set_af_gain(active_receiver->id,value);
       break;
     case AF_GAIN_RX1:
