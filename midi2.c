@@ -41,9 +41,9 @@ void NewMidiEvent(enum MIDIevent event, int channel, int note, int val) {
     double now;          // used in debug code
 
 //Un-comment next three lines to get a log of incoming MIDI messages
-//clock_gettime(CLOCK_MONOTONIC, &ts);
-//now=ts.tv_sec + 1E-9*ts.tv_nsec;
-//g_print("%s:%12.3f:EVENT=%d CHAN=%d NOTE=%d VAL=%d\n",__FUNCTION__,now,event,channel,note,val);
+clock_gettime(CLOCK_MONOTONIC, &ts);
+now=ts.tv_sec + 1E-9*ts.tv_nsec;
+g_print("%s:%12.3f:EVENT=%d CHAN=%d NOTE=%d VAL=%d\n",__FUNCTION__,now,event,channel,note,val);
 
     if (event == MIDI_PITCH) {
 	desc=MidiCommandsTable[128];

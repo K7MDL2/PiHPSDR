@@ -30,6 +30,18 @@
 #include <pthread.h>
 #include <alsa/asoundlib.h>
 
+//extern int cw_keys_reversed; // 0=disabled 1=enabled
+extern int cw_keyer_speed; // 1-60 WPM
+//extern int cw_keyer_mode;
+//extern int cw_keyer_weight; // 0-100
+//extern int cw_keyer_spacing; // 0=on 1=off
+//extern int cw_keyer_internal; // 0=external 1=internal
+extern int cw_keyer_sidetone_volume; // 0-127
+//extern int cw_keyer_ptt_delay; // 0-255ms
+//extern int cw_keyer_hang_time; // ms
+extern int cw_keyer_sidetone_frequency; // Hz
+//extern int cw_breakin; // 0=disabled 1=enabled
+
 MIDI_DEVICE midi_devices[MAX_MIDI_DEVICES];
 int n_midi_devices;
 
@@ -40,6 +52,7 @@ int n_midi_devices;
 static pthread_t midi_thread_id[MAX_MIDI_DEVICES];
 static char *midi_port[MAX_MIDI_DEVICES];
 static snd_rawmidi_t *midi_input[MAX_MIDI_DEVICES];
+static snd_rawmidi_t *midi_output[MAX_MIDI_DEVICES];
 
 static void* midi_thread(void *);
 
@@ -65,6 +78,7 @@ void configure_midi_device(gboolean state) {
 static void *midi_thread(void *arg) {
     int index = (int) arg;
     snd_rawmidi_t *input=midi_input[index];
+    snd_rawmidi_t *output=midi_output[index];
     char *port=midi_port[index];
 
     int ret;
@@ -75,13 +89,94 @@ static void *midi_thread(void *arg) {
     unsigned short revents;
     int i;
     int chan,arg1,arg2;
-    
-    
+    char lsb_val, msb_val;
+    static int last_cw_keyer_speed = 0;
+    static int last_cw_keyer_sidetone_volume = 0;
+    static int last_cw_keyer_sidetone_frequency = 0;
 
     npfds = snd_rawmidi_poll_descriptors_count(input);
     pfds = alloca(npfds * sizeof(struct pollfd));
     snd_rawmidi_poll_descriptors(input, pfds, npfds);
     for (;;) {
+	
+	// Check if any Keyer config paramters ahve changed and send MIDI commands to update the keyer
+	// Ugly Test code for MIDI commands to keyer
+	unsigned char ch, ch1, ch2;
+	// Send ctl_chg, on Ch1 for K3NG keyer.
+	// 0 is first byte for 16 bit doble commands
+	// 4 is Keyer Speed		// 1 byte cmd
+	// 5 is Sidetone Volume 	// 2nd byte double cmd
+	// 6 is Sidetone Frequency  	// 2nd byte double cmd
+	// 16 is Audio Volume		// 2nd byte double cmd
+	    
+	if(cw_keyer_speed != last_cw_keyer_speed) {
+	    last_cw_keyer_speed = cw_keyer_speed;
+	    //CW Speed
+	    ch=177; snd_rawmidi_write(output,&ch,1);
+	    ch1=4;  snd_rawmidi_write(output,&ch1,1);
+	    ch2=(char)last_cw_keyer_speed; snd_rawmidi_write(output,&ch2,1);
+	    g_print("%s: Sending MIDI Speed Cmd to Keyer: %d %d %d\n",__FUNCTION__, ch, ch1, ch2);
+	    snd_rawmidi_drain(output);
+	}
+	if(cw_keyer_sidetone_volume != last_cw_keyer_sidetone_volume) {
+	    last_cw_keyer_sidetone_volume = cw_keyer_sidetone_volume;
+	    // Set Sidetone Level
+	    lsb_val = (char) (last_cw_keyer_sidetone_volume & 0x0F);
+	    msb_val = (char) (last_cw_keyer_sidetone_volume & 0xF0);
+	    ch=177; snd_rawmidi_write(output,&ch,1);
+	    ch1=0;  snd_rawmidi_write(output,&ch1,1);
+	    ch2=msb_val;  snd_rawmidi_write(output,&ch2,1);
+	    g_print("%s: Sending MIDI Sidetone Level Cmd #1 to Keyer: %d %d %d\n",__FUNCTION__, ch, ch1, ch2);
+	    snd_rawmidi_drain(output);	
+	    sleep(1);
+	    ch=177; snd_rawmidi_write(output,&ch,1);
+	    ch1=5;  snd_rawmidi_write(output,&ch1,1);
+	    ch2=lsb_val;  snd_rawmidi_write(output,&ch2,1);
+	    g_print("%s: Sending MIDI Sidetone Level Cmd #2 to Keyer:%d %d %d\n",__FUNCTION__, ch, ch1, ch2);
+	    snd_rawmidi_drain(output);
+	}
+	if(cw_keyer_sidetone_frequency != last_cw_keyer_sidetone_frequency) {
+	    last_cw_keyer_sidetone_frequency = cw_keyer_sidetone_frequency;
+	    // Sidetone Pitch - 100 to 1000 for piHPSDR CW menu range
+	    int val = (last_cw_keyer_sidetone_frequency); 
+	    val = val/127; // 1000/7 = 0 to 127
+	    lsb_val = (char) (val & 0x0F);
+	    msb_val = (char) (val & 0xF0);
+	    ch=177; snd_rawmidi_write(output,&ch,1);
+	    ch1=0;  snd_rawmidi_write(output,&ch1,1);
+	    ch2=msb_val;  snd_rawmidi_write(output,&ch2,1);
+	    g_print("%s: Sending MIDI Sidetone Pitch Cmd #1 to Keyer: %d %d %d\n",__FUNCTION__, ch, ch1, ch2);
+	    snd_rawmidi_drain(output);	
+	    sleep(1);
+	    ch=177; snd_rawmidi_write(output,&ch,1);
+	    ch1=6;  snd_rawmidi_write(output,&ch1,1);
+	    ch2=lsb_val;  snd_rawmidi_write(output,&ch2,1);
+	    g_print("%s: Sending MIDI Sidetone Pitch Cmd #2 to Keyer:%d %d %d\n",__FUNCTION__, ch, ch1, ch2);
+	    snd_rawmidi_drain(output);
+	}
+	
+	/*
+	if(volumexxx != last_volumexxxxx) {
+	* last_volumexxxxx = volumexxxxx;
+	    // Main Volume in Keyer Audio
+	    // active_receiver->id,value 
+	    lsb_val = (char) (XXXXXX & 0x0F);
+	    msb_val = (char) (XXXXXX & 0xF0);
+	    ch=177; snd_rawmidi_write(output,&ch,1);
+	    ch1=0;  snd_rawmidi_write(output,&ch1,1);
+	    ch2=msb_val;  snd_rawmidi_write(output,&ch2,1);
+	    g_print("%s: Sending MIDI USB Audio Volume Cmd #1 to Keyer: %d %d %d\n",__FUNCTION__, ch, ch1, ch2);
+	    snd_rawmidi_drain(output);	
+	    sleep(1);
+	    ch=177; snd_rawmidi_write(output,&ch,1);
+	    ch1=16;  snd_rawmidi_write(output,&ch1,1);
+	    ch2=lsb_val;  snd_rawmidi_write(output,&ch2,1);
+	    g_print("%s: Sending MIDI USB Audio Volume Cmd #2 to Keyer:%d %d %d\n",__FUNCTION__, ch, ch1, ch2);
+	    snd_rawmidi_drain(output);	
+	}
+	*/	
+	// Continue on with RX events    
+    
 	ret = poll(pfds, npfds, 250);
         if (!midi_devices[index].active) break;
 	if (ret < 0) {
@@ -90,6 +185,7 @@ static void *midi_thread(void *arg) {
 	    usleep(250000);
 	}
 	if (ret <= 0) continue;  // nothing arrived, do next poll()
+	
 	if ((ret = snd_rawmidi_poll_descriptors_revents(input, pfds, npfds, &revents)) < 0) {
             fprintf(stderr,"cannot get poll events: %s\n", snd_strerror(errno));
             continue;
@@ -199,11 +295,12 @@ void register_midi_device(int index) {
 
     g_print("%s: open MIDI device %d\n", __FUNCTION__, index);
 
-    if ((ret = snd_rawmidi_open(&midi_input[index], NULL, midi_port[index], SND_RAWMIDI_NONBLOCK)) < 0) {
+    if ((ret = snd_rawmidi_open(&midi_input[index], &midi_output[index], midi_port[index], SND_RAWMIDI_NONBLOCK)) < 0) {
         fprintf(stderr,"cannot open port \"%s\": %s\n", midi_port[index], snd_strerror(ret));
         return;
     }
     snd_rawmidi_read(midi_input[index], NULL, 0); /* trigger reading */
+    //snd_rawmidi_read(midi_output[index], NULL, 0); /* trigger writing */
 
 
     ret = pthread_create(&midi_thread_id[index], NULL, midi_thread, (void *) index);

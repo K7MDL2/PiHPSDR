@@ -343,7 +343,12 @@ int cw_audio_write(RECEIVER *rx,float sample) {
   int result=0;
   int rc;
   int err;
-
+  
+  #ifndef LOCALCW
+    if (!cw_keyer_internal) 
+      sample = 0;   // Mute the local sidetone when a ewxternal 
+  #endif
+  
   g_mutex_lock(&rx->local_audio_mutex);
 
   if (rx->playstream != NULL && rx->local_audio_buffer != NULL) {
