@@ -198,13 +198,14 @@ static int timeout_cb(gpointer data) {
   return TRUE;
 }
 
-
 static inline double KnobOrWheel(PROCESS_ACTION *a, double oldval, double minval, double maxval, double inc) {
   //
-  // Slider: set value
-  // Wheel:  increment/decrement the value (by "inc" per tick)
+  // Knob ("Potentiometer"):  set value
+  // Wheel("Rotary Encoder"): increment/decrement the value (by "inc" per tick)
   //
-  // In either case, the returned value is in the range minval...maxval
+  // In both cases, the returned value is
+  //  - in the range minval...maxval
+  //  - rounded to a multiple of inc
   //
   switch (a->mode) {
     case RELATIVE:
@@ -212,20 +213,19 @@ static inline double KnobOrWheel(PROCESS_ACTION *a, double oldval, double minval
       break;
     case ABSOLUTE:
       oldval = minval + a->val*(maxval-minval)*0.01;
-      //
-      // Round the new value to a multiple of inc
-      //
-      oldval=inc*round(oldval/inc);
       break;
     default:
       // do nothing
       break;
   }
+  //
+  // Round and check range
+  //
+  oldval=inc*round(oldval/inc);
   if (oldval > maxval) oldval=maxval;
   if (oldval < minval) oldval=minval;
   return oldval;
 }
-
 
 int process_action(void *data) {
   PROCESS_ACTION *a=(PROCESS_ACTION *)data;
@@ -497,17 +497,17 @@ int process_action(void *data) {
       }
       break;
     case COMP_ENABLE:
-      if(can_transmit) {
+      if(can_transmit && a->mode==PRESSED) {
         transmitter_set_compressor(transmitter,transmitter->compressor?FALSE:TRUE);
       }
       break;
     case COMPRESSION:
       if(can_transmit) {
         value=KnobOrWheel(a, transmitter->compressor_level, 0.0, 20.0, 1.0);
-	transmitter_set_compressor_level(transmitter,value);
+        transmitter_set_compressor_level(transmitter,value);
         transmitter_set_compressor(transmitter, value > 0.5);
+        g_idle_add(ext_vfo_update, NULL);
       }
-      g_idle_add(ext_vfo_update, NULL);
       break;
     case CTUN:
       if(a->mode==PRESSED) {
@@ -575,7 +575,7 @@ int process_action(void *data) {
       set_drive(value);
       break;
     case DUPLEX:
-      if(can_transmit && !isTransmitting()) {
+      if(can_transmit && !isTransmitting() && a->mode == PRESSED) {
         duplex=duplex==1?0:1;
         g_idle_add(ext_set_duplex, NULL);
       }
@@ -595,26 +595,28 @@ int process_action(void *data) {
       }
       break;
     case FUNCTION:
-      switch(controller) {
-        case NO_CONTROLLER:
-        case CONTROLLER1:
-          function++;
-          if(function>=MAX_FUNCTIONS) {
-            function=0;
-          }
-          toolbar_switches=switches_controller1[function];
-          switches=switches_controller1[function];
-          update_toolbar_labels();
-	  break;
-	case CONTROLLER2_V1:
-	case CONTROLLER2_V2:
-          function++;
-          if(function>=MAX_FUNCTIONS) {
-            function=0;
-          }
-          toolbar_switches=switches_controller1[function];
-          update_toolbar_labels();
-	  break;
+      if(a->mode==PRESSED) {
+        switch(controller) {
+          case NO_CONTROLLER:
+          case CONTROLLER1:
+            function++;
+            if(function>=MAX_FUNCTIONS) {
+              function=0;
+            }
+            toolbar_switches=switches_controller1[function];
+            switches=switches_controller1[function];
+            update_toolbar_labels();
+	    break;
+	  case CONTROLLER2_V1:
+	  case CONTROLLER2_V2:
+            function++;
+            if(function>=MAX_FUNCTIONS) {
+              function=0;
+            }
+            toolbar_switches=switches_controller1[function];
+            update_toolbar_labels();
+	    break;
+        }
       }
       break;
     case IF_SHIFT:
@@ -787,40 +789,64 @@ int process_action(void *data) {
       }
       break;
     case NUMPAD_0:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(0));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(0));
+      }
       break;
     case NUMPAD_1:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(1));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(1));
+      }
       break;
     case NUMPAD_2:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(2));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(2));
+      }
       break;
     case NUMPAD_3:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(3));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(3));
+      }
       break;
     case NUMPAD_4:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(4));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(4));
+      }
       break;
     case NUMPAD_5:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(5));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(5));
+      }
       break;
     case NUMPAD_6:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(6));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(6));
+      }
       break;
     case NUMPAD_7:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(7));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(7));
+      }
       break;
     case NUMPAD_8:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(8));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(8));
+      }
       break;
     case NUMPAD_9:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(9));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(9));
+      }
       break;
     case NUMPAD_CL:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(-1));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(-1));
+      }
       break;
     case NUMPAD_ENTER:
-      g_idle_add(ext_num_pad,GINT_TO_POINTER(-2));
+      if(a->mode==PRESSED) {
+        g_idle_add(ext_num_pad,GINT_TO_POINTER(-2));
+      }
       break;
     case PAN:
       update_pan((double)a->val*100);
@@ -845,8 +871,10 @@ int process_action(void *data) {
       break;
     case PANADAPTER_STEP:
       value=KnobOrWheel(a, active_receiver->panadapter_step, 5.0, 30.0, 1.0);
+      active_receiver->panadapter_step=(int)value;
       break;
     case PREAMP:
+      break;
     case PS:
 #ifdef PURESIGNAL
       if(a->mode==PRESSED) {
@@ -934,18 +962,29 @@ int process_action(void *data) {
 	  if(rit_increment<1) rit_increment=100;
 	  if(rit_increment>100) rit_increment=1;
 	  break;
+	default:
+	  // ignore other types
+	  break;
       }
       g_idle_add(ext_vfo_update,NULL);
       break;
     case RSAT:
       if(a->mode==PRESSED) {
-        sat_mode=RSAT_MODE;
+        if(sat_mode==RSAT_MODE) {
+          sat_mode=SAT_NONE;
+        } else {
+          sat_mode=RSAT_MODE;
+        }
         g_idle_add(ext_vfo_update, NULL);
       }
       break;
     case SAT:
       if(a->mode==PRESSED) {
-        sat_mode=SAT_MODE;
+	if(sat_mode==SAT_MODE) {
+	  sat_mode=SAT_NONE;
+	} else {
+	  sat_mode=SAT_MODE;
+	}
         g_idle_add(ext_vfo_update, NULL);
       }
       break;
@@ -1042,7 +1081,9 @@ int process_action(void *data) {
       }
       break;
     case VFO:
-      vfo_step(a->val);
+      if(a->mode==RELATIVE && !locked) {
+        vfo_step(a->val);
+      }
       break;
     case VFO_STEP_MINUS:
       if(a->mode==PRESSED) {
@@ -1069,8 +1110,10 @@ int process_action(void *data) {
       }
       break;
     case VOX:
-      vox_enabled = !vox_enabled;
-      g_idle_add(ext_vfo_update, NULL);
+      if(a->mode==PRESSED) {
+        vox_enabled = !vox_enabled;
+        g_idle_add(ext_vfo_update, NULL);
+      }
       break;
     case VOXLEVEL:
       vox_threshold=KnobOrWheel(a, vox_threshold, 0.0, 1.0, 0.01);

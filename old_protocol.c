@@ -409,12 +409,7 @@ static void open_udp_socket() {
     //optval = 0x10;  // IPTOS_LOWDELAY
     optval = 0xb8;  // DSCP EF
     if(setsockopt(tmp, IPPROTO_IP, IP_TOS, &optval, sizeof(optval))<0) {
-      perror("data_socket: SO_PRIORITY");
-    }
-#else
-    optval = 6;
-    if(setsockopt(tmp, SOL_SOCKET, SO_PRIORITY, &optval, sizeof(optval))<0) {
-      perror("data_socket: SO_PRIORITY");
+      perror("data_socket: IP_TOS");
     }
 #endif
 
@@ -484,12 +479,7 @@ static void open_tcp_socket() {
     //optval = 0x10;  // IPTOS_LOWDELAY
     optval = 0xb8;  // DSCP EF
     if(setsockopt(tmp, IPPROTO_IP, IP_TOS, &optval, sizeof(optval))<0) {
-      perror("data_socket: SO_PRIORITY");
-    }
-#else
-    optval = 6;
-    if(setsockopt(tmp, SOL_SOCKET, SO_PRIORITY, &optval, sizeof(optval))<0) {
-      perror("data_socket: SO_PRIORITY");
+      perror("data_socket: IP_TOS");
     }
 #endif
     tcp_socket=tmp;
@@ -565,7 +555,11 @@ static gpointer receive_thread(gpointer arg) {
 	      // A sequence error with a seqnum of zero usually indicates a METIS restart
 	      // and is no error condition
               if (sequence != 0 && sequence != last_seq_num+1) {
-		g_print("SEQ ERROR: last %ld, recvd %ld\n", (long) last_seq_num, (long) sequence);
+		struct timespec ts;
+		double now;
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		now=ts.tv_sec + 1E-9*ts.tv_nsec;
+		g_print("SEQ ERROR: T=%0.3f last %ld, recvd %ld\n", now, (long) last_seq_num, (long) sequence);
                 sequence_errors++;
 	      }
 	      last_seq_num=sequence;
@@ -1157,13 +1151,6 @@ static void process_ozy_input_buffer(unsigned char  *buffer) {
 // that are called both by the RX and TX thread, and are filling and sending the
 // output buffer.
 //
-// In 99% if the cases, the check on isTransmitting() controls that only one
-// of the functions becomes active, but at the moment of a RX/TX transition
-// this may fail.
-//
-// So "blocking" can only occur very rarely, such that the lock/unlock
-// should cost only few CPU cycles.
-//
 
 static pthread_mutex_t send_buffer_mutex   = PTHREAD_MUTEX_INITIALIZER;
 
@@ -1628,8 +1615,8 @@ void ozy_send_buffer() {
           output_buffer[C2]= 0x00;
           output_buffer[C3]= 0x00;
           output_buffer[C4]= 0x00;
-          if (pa_enabled || txband->disablePA) output_buffer[C2] |= 0x08;
-          if (tune)                            output_buffer[C2] |= 0x10;
+          if (pa_enabled && !txband->disablePA) output_buffer[C2] |= 0x08;
+          if (tune)                             output_buffer[C2] |= 0x10;
         }
         command=4;
         break;

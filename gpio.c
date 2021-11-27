@@ -348,7 +348,7 @@ static void initialiseEpoch() {
   epochMilli = (uint64_t)ts.tv_sec * (uint64_t)1000    + (uint64_t)(ts.tv_nsec / 1000000L) ;
 }
 
-static unsigned int millis () {
+unsigned int millis () {
   uint64_t now ;
   struct  timespec ts ;
   clock_gettime (CLOCK_MONOTONIC_RAW, &ts) ;
@@ -370,18 +370,28 @@ static gpointer rotary_encoder_thread(gpointer data) {
         a=g_new(PROCESS_ACTION,1);
         a->action=encoders[i].bottom_encoder_function;
         a->mode=RELATIVE;
-        a->val=encoders[i].bottom_encoder_pos;
-        g_idle_add(process_action,a);
-        encoders[i].bottom_encoder_pos=0;
+	if(a->action==VFO && vfo_encoder_divisor>1) {
+          a->val=encoders[i].bottom_encoder_pos/vfo_encoder_divisor;
+          encoders[i].bottom_encoder_pos=encoders[i].bottom_encoder_pos-(a->val*vfo_encoder_divisor);
+        } else {
+          a->val=encoders[i].bottom_encoder_pos;
+          encoders[i].bottom_encoder_pos=0;
+	}
+	if(a->val!=0) g_idle_add(process_action,a); else g_free(a);
       }
       if(encoders[i].top_encoder_enabled && encoders[i].top_encoder_pos!=0) {
         //g_print("%s: TOP encoder %d pos=%d\n",__FUNCTION__,i,encoders[i].top_encoder_pos);
         a=g_new(PROCESS_ACTION,1);
         a->action=encoders[i].top_encoder_function;
         a->mode=RELATIVE;
-        a->val=encoders[i].top_encoder_pos;
-        g_idle_add(process_action,a);
-        encoders[i].top_encoder_pos=0;
+	if(a->action==VFO && vfo_encoder_divisor>1) {
+          a->val=encoders[i].top_encoder_pos/vfo_encoder_divisor;
+          encoders[i].top_encoder_pos=encoders[i].top_encoder_pos-(a->val*vfo_encoder_divisor);
+        } else {
+          a->val=encoders[i].top_encoder_pos;
+          encoders[i].top_encoder_pos=0;
+	}
+	if(a->val!=0) g_idle_add(process_action,a); else g_free(a);
       }
     }
     g_mutex_unlock(&encoder_mutex);
@@ -403,7 +413,7 @@ int process_function_switch(void *data) {
 
 static void process_encoder(int e,int l,int addr,int val) {
   guchar pinstate;
-  g_print("%s: encoder=%d level=%d addr=0x%02X val=%d\n",__FUNCTION__,e,l,addr,val);
+  //g_print("%s: encoder=%d level=%d addr=0x%02X val=%d\n",__FUNCTION__,e,l,addr,val);
   g_mutex_lock(&encoder_mutex);
   switch(l) {
     case BOTTOM_ENCODER:
@@ -412,7 +422,7 @@ static void process_encoder(int e,int l,int addr,int val) {
           encoders[e].bottom_encoder_a_value=val;
           pinstate=(encoders[e].bottom_encoder_b_value<<1) | encoders[e].bottom_encoder_a_value;
           encoders[e].bottom_encoder_state=encoder_state_table[encoders[e].bottom_encoder_state&0xf][pinstate];
-          g_print("%s: state=%02X\n",__FUNCTION__,encoders[e].bottom_encoder_state);
+          //g_print("%s: state=%02X\n",__FUNCTION__,encoders[e].bottom_encoder_state);
           switch(encoders[e].bottom_encoder_state&0x30) {
             case DIR_NONE:
               break;
@@ -426,13 +436,13 @@ static void process_encoder(int e,int l,int addr,int val) {
               break;
           }
 
-          g_print("%s: %d BOTTOM pos=%d\n",__FUNCTION__,e,encoders[e].bottom_encoder_pos);
+          //g_print("%s: %d BOTTOM pos=%d\n",__FUNCTION__,e,encoders[e].bottom_encoder_pos);
           break;
         case B:
           encoders[e].bottom_encoder_b_value=val;
           pinstate=(encoders[e].bottom_encoder_b_value<<1) | encoders[e].bottom_encoder_a_value;
           encoders[e].bottom_encoder_state=encoder_state_table[encoders[e].bottom_encoder_state&0xf][pinstate];
-          g_print("%s: state=%02X\n",__FUNCTION__,encoders[e].bottom_encoder_state);
+          //g_print("%s: state=%02X\n",__FUNCTION__,encoders[e].bottom_encoder_state);
           switch(encoders[e].bottom_encoder_state&0x30) {
             case DIR_NONE:
               break;
@@ -446,7 +456,7 @@ static void process_encoder(int e,int l,int addr,int val) {
               break;
           }
 
-          g_print("%s: %d BOTTOM pos=%d\n",__FUNCTION__,e,encoders[e].bottom_encoder_pos);
+          //g_print("%s: %d BOTTOM pos=%d\n",__FUNCTION__,e,encoders[e].bottom_encoder_pos);
 
           break;
       }
@@ -457,7 +467,7 @@ static void process_encoder(int e,int l,int addr,int val) {
           encoders[e].top_encoder_a_value=val;
           pinstate=(encoders[e].top_encoder_b_value<<1) | encoders[e].top_encoder_a_value;
           encoders[e].top_encoder_state=encoder_state_table[encoders[e].top_encoder_state&0xf][pinstate];
-          g_print("%s: state=%02X\n",__FUNCTION__,encoders[e].top_encoder_state);
+          //g_print("%s: state=%02X\n",__FUNCTION__,encoders[e].top_encoder_state);
           switch(encoders[e].top_encoder_state&0x30) {
             case DIR_NONE:
               break;
@@ -470,13 +480,13 @@ static void process_encoder(int e,int l,int addr,int val) {
             default:
               break;
           }
-          g_print("%s: %d TOP pos=%d\n",__FUNCTION__,e,encoders[e].top_encoder_pos);
+          //g_print("%s: %d TOP pos=%d\n",__FUNCTION__,e,encoders[e].top_encoder_pos);
           break;
         case B:
           encoders[e].top_encoder_b_value=val;
           pinstate=(encoders[e].top_encoder_b_value<<1) | encoders[e].top_encoder_a_value;
           encoders[e].top_encoder_state=encoder_state_table[encoders[e].top_encoder_state&0xf][pinstate];
-          g_print("%s: state=%02X\n",__FUNCTION__,encoders[e].top_encoder_state);
+          //g_print("%s: state=%02X\n",__FUNCTION__,encoders[e].top_encoder_state);
           switch(encoders[e].top_encoder_state&0x30) {
             case DIR_NONE:
               break;
@@ -489,7 +499,7 @@ static void process_encoder(int e,int l,int addr,int val) {
             default:
               break;
           }
-          g_print("%s: %d TOP pos=%d\n",__FUNCTION__,e,encoders[e].top_encoder_pos);
+          //g_print("%s: %d TOP pos=%d\n",__FUNCTION__,e,encoders[e].top_encoder_pos);
 
           break;
       }
@@ -498,39 +508,64 @@ static void process_encoder(int e,int l,int addr,int val) {
   g_mutex_unlock(&encoder_mutex);
 }
 
+void do_switch_action(enum ACTION action, enum ACTION_MODE mode) {
+
+  //
+  // for a given action with mode==PRESSED or mode==RELEASED,
+  // put the "action" into the GTK idle queue. This is done here because
+  // we want to process CW events outside the GTK queue
+  // (this is also called from i2c.c)
+
+  PROCESS_ACTION *a;
+
+  switch (action) {
+    case CW_KEYER:
+      if (mode == PRESSED && cw_keyer_internal == 0) {
+       cw_key_down=960000;  // max. 20 sec to protect hardware
+       cw_key_up=0;
+       cw_key_hit=1;
+     } else {
+       cw_key_down=0;
+       cw_key_up=0;
+     }
+     break;
+#ifdef LOCALCW
+   case CW_LEFT:
+     keyer_event(1, CW_ACTIVE_LOW ? (mode==PRESSED) : (mode==RELEASED));
+     break;
+   case CW_RIGHT:
+     keyer_event(0, CW_ACTIVE_LOW ? (mode==PRESSED) : (mode==RELEASED));
+     break;
+#endif
+   default:
+     a=g_new(PROCESS_ACTION,1);
+     a->action=action;
+     a->mode=mode;
+     g_idle_add(process_action,a);
+  }              
+
+  
+}
+
 static void process_edge(int offset,int value) {
   gint i;
-  unsigned int t;  // should be gulong, but then also change millis()
+  unsigned int t;
   gboolean found;
 
   //g_print("%s: offset=%d value=%d\n",__FUNCTION__,offset,value);
   found=FALSE;
-  //
-  // handle CW events as quickly as possible HERE.
-  //
-  switch (offset) {
-    case CW_KEYER:
-      if (value == PRESSED && cw_keyer_internal == 0) {
-        cw_key_down=960000;  // max. 20 sec to protect hardware
-        cw_key_up=0;
-        cw_key_hit=1;
-      } else {
-        cw_key_down=0;
-        cw_key_up=0;
-      }
-      return;
 #ifdef LOCALCW
-    case CW_LEFT:
-      keyer_event(1, CW_ACTIVE_LOW ? (value==PRESSED) : (value==RELEASED));
-      return;
-    case CW_RIGHT:
-      keyer_event(0, CW_ACTIVE_LOW ? (value==PRESSED) : (value==RELEASED));
-      return;
-    default:
-      break; // do nothing, continue
-#endif
+  if(ENABLE_CW_BUTTONS) {
+    if(offset==CWL_BUTTON) {
+      keyer_event(1, CW_ACTIVE_LOW ? (value==PRESSED) : value);
+      found=TRUE;
+    } else if(offset==CWR_BUTTON) {
+      keyer_event(1, CW_ACTIVE_LOW ? (value==PRESSED) : value);
+      found=TRUE;
+    }
   }
-  found=FALSE;
+  if(found) return;
+#endif
   // check encoders
   for(i=0;i<MAX_ENCODERS;i++) {
     if(encoders[i].bottom_encoder_enabled && encoders[i].bottom_encoder_address_a==offset) {
@@ -560,10 +595,7 @@ static void process_edge(int offset,int value) {
         return;
       }
       encoders[i].switch_debounce=t+settle_time;
-      PROCESS_ACTION *a=g_new(PROCESS_ACTION,1);
-      a->action=encoders[i].switch_function;
-      a->mode=value;
-      g_idle_add(process_action,a);
+      do_switch_action(encoders[i].switch_function, value);
       found=TRUE;
       break;
     }
@@ -589,10 +621,7 @@ static void process_edge(int offset,int value) {
         }
 //g_print("%s: switches=%p function=%d (%s)\n",__FUNCTION__,switches,switches[i].switch_function,sw_string[switches[i].switch_function]);
         switches[i].switch_debounce=t+settle_time;
-        PROCESS_ACTION *a=g_new(PROCESS_ACTION,1);
-        a->action=switches[i].switch_function;
-        a->mode=value;
-        g_idle_add(process_action,a);
+        do_switch_action(switches[i].switch_function, value);
         break;
       }
     }
@@ -650,6 +679,7 @@ void gpio_set_defaults(int ctrlr) {
       ENABLE_GPIO_SIDETONE=0;
       ENABLE_CW_BUTTONS=0;
 #endif
+
       encoders=encoders_controller2_v2;
       switches=switches_controller2_v2;
       break;
@@ -1114,7 +1144,7 @@ void gpio_cw_sidetone_set(int level) {
 #else
     if((rc=gpiod_ctxless_set_value_ext(gpio_device,SIDETONE_GPIO,level,FALSE,consumer,NULL,NULL,0))<0) {
 #endif
-       g_print("%s: err=%d\n",__FUNCTION__,rc);
+	g_print("%s: err=%d\n",__FUNCTION__,rc);
     }
 #endif
   }

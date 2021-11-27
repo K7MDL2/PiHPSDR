@@ -75,8 +75,8 @@
 #define RXACTION_PS     2    // deliver 2*119 samples to PS engine
 #define RXACTION_DIV    3    // take 2*119 samples, mix them, deliver to a receiver
 
-static int rxcase[8];
-static int rxid  [8];
+static int rxcase[7/*MAX_DDC*/];
+static int rxid  [7/*MAX_DDC*/];
 
 int data_socket=-1;
 
@@ -109,8 +109,8 @@ static int audio_addr_length;
 static struct sockaddr_in iq_addr;
 static int iq_addr_length;
 
-static struct sockaddr_in data_addr[8];
-static int data_addr_length[8];
+static struct sockaddr_in data_addr[7/*MAX_DDC*/];
+static int data_addr_length[7/*MAX_DDC*/];
 
 static GThread *new_protocol_thread_id;
 static GThread *new_protocol_timer_thread_id;
@@ -119,7 +119,7 @@ static long high_priority_sequence = 0;
 static long general_sequence = 0;
 static long rx_specific_sequence = 0;
 static long tx_specific_sequence = 0;
-static long ddc_sequence[8];
+static long ddc_sequence[7/*MAX_DDC*/];
 
 //static int buffer_size=BUFFER_SIZE;
 //static int fft_size=4096;
@@ -175,13 +175,13 @@ static sem_t mic_line_sem_buffer;
 #endif
 static GThread *mic_line_thread_id;
 #ifdef __APPLE__
-static sem_t *iq_sem_ready[8];
-static sem_t *iq_sem_buffer[8];
+static sem_t *iq_sem_ready[7/*MAX_DDC*/];
+static sem_t *iq_sem_buffer[7/*MAX_DDC*/];
 #else
-static sem_t iq_sem_ready[8];
-static sem_t iq_sem_buffer[8];
+static sem_t iq_sem_ready[7/*MAX_DDC*/];
+static sem_t iq_sem_buffer[7/*MAX_DDC*/];
 #endif
-static GThread *iq_thread_id[8];
+static GThread *iq_thread_id[7/*MAX_DDC*/];
 
 #ifdef INCLUDED
 static int outputsamples;
@@ -241,7 +241,7 @@ static mybuffer *buflist = NULL;
 //
 // The buffers used by new_protocol_thread
 //
-static mybuffer *iq_buffer[8];
+static mybuffer *iq_buffer[7/*MAX_DDC*/];
 static mybuffer *command_response_buffer;
 static mybuffer *high_priority_buffer;
 static mybuffer *mic_line_buffer;
@@ -265,7 +265,7 @@ static pthread_mutex_t rx_spec_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t tx_spec_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t hi_prio_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t general_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t audio_mutex   = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t audio_buffer_mutex  = PTHREAD_MUTEX_INITIALIZER;
 
 static int local_ptt=0;
 
@@ -598,12 +598,7 @@ void new_protocol_init(int pixels) {
     //optval = 0x10;  // IPTOS_LOWDELAY
     optval = 0xb8;  // DSCP EF
     if(setsockopt(data_socket, IPPROTO_IP, IP_TOS, &optval, sizeof(optval))<0) {
-      perror("data_socket: SO_PRIORITY");
-    }
-#else
-    optval = 6;
-    if(setsockopt(data_socket, SOL_SOCKET, SO_PRIORITY, &optval, sizeof(optval))<0) {
-      perror("data_socket: SO_PRIORITY");
+      perror("data_socket: IP_TOS");
     }
 #endif
 
@@ -692,7 +687,7 @@ static void new_protocol_general() {
     general_buffer[37]=0x08;  //  phase word (not frequency)
     general_buffer[38]=0x01;  //  enable hardware timer
 
-    if(band->disablePA) {
+    if(!pa_enabled || band->disablePA) {
       general_buffer[58]=0x00;
     } else {
       general_buffer[58]=0x01;  // enable PA
@@ -2007,7 +2002,7 @@ void new_protocol_cw_audio_samples(short left_audio_sample,short right_audio_sam
     //
     // Only process samples if transmitting in CW
     //
-    pthread_mutex_lock(&audio_mutex);
+    pthread_mutex_lock(&audio_buffer_mutex);
     // insert the samples
     audiobuffer[audioindex++]=left_audio_sample>>8;
     audiobuffer[audioindex++]=left_audio_sample;
@@ -2029,7 +2024,7 @@ void new_protocol_cw_audio_samples(short left_audio_sample,short right_audio_sam
       audioindex=4;
       audiosequence++;
     }
-    pthread_mutex_unlock(&audio_mutex);
+    pthread_mutex_unlock(&audio_buffer_mutex);
   }
 }
 
@@ -2042,7 +2037,7 @@ void new_protocol_audio_samples(RECEIVER *rx,short left_audio_sample,short right
   //
   if (isTransmitting() && (txmode==modeCWU || txmode==modeCWL)) return;
 
-  pthread_mutex_lock(&audio_mutex);
+  pthread_mutex_lock(&audio_buffer_mutex);
   // insert the samples
   audiobuffer[audioindex++]=left_audio_sample>>8;
   audiobuffer[audioindex++]=left_audio_sample;
@@ -2066,7 +2061,7 @@ void new_protocol_audio_samples(RECEIVER *rx,short left_audio_sample,short right
     audioindex=4;
     audiosequence++;
   }
-  pthread_mutex_unlock(&audio_mutex);
+  pthread_mutex_unlock(&audio_buffer_mutex);
 }
 
 void new_protocol_flush_iq_samples() {

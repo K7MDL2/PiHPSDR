@@ -893,6 +893,8 @@ fprintf(stderr,"create_transmitter: id=%d buffer_size=%d mic_sample_rate=%d mic_
   tx->swr_protection = FALSE;
   tx->swr_alarm=3.0;       // default value for SWR protection
 
+  tx->alc=0.0;
+
   transmitter_restore_state(tx);
 
 
@@ -1139,7 +1141,7 @@ static void full_tx_buffer(TRANSMITTER *tx) {
       break;
 #ifdef SOAPYSDR
     case SOAPYSDR_PROTOCOL:
-      gain=32767.0;  // 16 bit
+      // gain is not used, since samples are floating point
       break;
 #endif
   }
@@ -1181,7 +1183,7 @@ static void full_tx_buffer(TRANSMITTER *tx) {
     // by about 20 dB and at 1000 Hz by about 10 dB.
     // Natural speech has much energy at frequencies below 1000 Hz
     // which will therefore aquire only little energy, such that
-    // FM sounds rather silent.
+    // FM sounds rather "thin".
     //
     // At the expense of having some distortion for the highest
     // frequencies, we amplify the mic samples here by 15 dB
@@ -1259,7 +1261,8 @@ static void full_tx_buffer(TRANSMITTER *tx) {
       // 7.5 dB we have to damp significantly at this place, which may affect IMD.
       //
       // NOTE: When doing adaptive pre-distortion (PURESIGNAL), IQ scaling cannot
-      //       be used.
+      //       be used because the the TX ADC samples reported back also never
+      //       reach their "SetPK" amplitude and PURESIGNAL does not jump in
       //
       int power;
       double f,g;
@@ -1342,11 +1345,9 @@ static void full_tx_buffer(TRANSMITTER *tx) {
             // the only difference to the P2 treatment is that we do not
             // generate audio samples to be sent to the radio
             //
-	    isample=0;
             for(j=0;j<tx->output_samples;j++) {
 	      ramp=cw_shape_buffer192[j];	    		// between 0.0 and 1.0
-	      qsample=floor(gain*ramp+0.5);         	    	// always non-negative, isample is just the pulse envelope
-              soapy_protocol_iq_samples((float)isample,(float)qsample);
+              soapy_protocol_iq_samples(0.0F,(float)ramp);      // SOAPY: just convert double to float
 	    }
 	    break;
 #endif
@@ -1357,13 +1358,8 @@ static void full_tx_buffer(TRANSMITTER *tx) {
 	//
 	for(j=0;j<tx->output_samples;j++) {
             double is,qs;
-            if(iqswap) {
-	      qs=tx->iq_output_buffer[j*2];
-	      is=tx->iq_output_buffer[(j*2)+1];
-            } else {
-	      is=tx->iq_output_buffer[j*2];
-	      qs=tx->iq_output_buffer[(j*2)+1];
-            }
+	    is=tx->iq_output_buffer[j*2];
+	    qs=tx->iq_output_buffer[(j*2)+1];
 	    isample=is>=0.0?(long)floor(is*gain+0.5):(long)ceil(is*gain-0.5);
 	    qsample=qs>=0.0?(long)floor(qs*gain+0.5):(long)ceil(qs*gain-0.5);
 	    switch(protocol) {
@@ -1375,7 +1371,8 @@ static void full_tx_buffer(TRANSMITTER *tx) {
 		    break;
 #ifdef SOAPYSDR
                 case SOAPYSDR_PROTOCOL:
-                    soapy_protocol_iq_samples((float)isample,(float)qsample);
+                    // SOAPY: just convert the double IQ sampels (is,qs) to float.
+                    soapy_protocol_iq_samples((float)is,(float)qs);
                     break;
 #endif
 	    }
