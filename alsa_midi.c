@@ -89,7 +89,8 @@ static void *midi_thread(void *arg) {
     unsigned short revents;
     int i;
     int chan,arg1,arg2;
-    char lsb_val, msb_val;
+    unsigned char lsb_val, msb_val;
+    char midi_cmd[3];
     static int last_cw_keyer_speed = 0;
     static int last_cw_keyer_sidetone_volume = 0;
     static int last_cw_keyer_sidetone_frequency = 0;
@@ -100,81 +101,58 @@ static void *midi_thread(void *arg) {
     for (;;) {
 	
 	// Check if any Keyer config paramters ahve changed and send MIDI commands to update the keyer
-	// Ugly Test code for MIDI commands to keyer
-	unsigned char ch, ch1, ch2;
 	// Send ctl_chg, on Ch1 for K3NG keyer.
-	// 0 is first byte for 16 bit doble commands
-	// 4 is Keyer Speed		// 1 byte cmd
+	// 0 is first byte for 16 bit double commands
+	// 4 is Keyer Speed		    // 1 byte cmd
 	// 5 is Sidetone Volume 	// 2nd byte double cmd
-	// 6 is Sidetone Frequency  	// 2nd byte double cmd
+	// 6 is Sidetone Frequency  // 2nd byte double cmd
 	// 16 is Audio Volume		// 2nd byte double cmd
 	    
 	if(cw_keyer_speed != last_cw_keyer_speed) {
 	    last_cw_keyer_speed = cw_keyer_speed;
-	    //CW Speed
-	    ch=177; snd_rawmidi_write(output,&ch,1);
-	    ch1=4;  snd_rawmidi_write(output,&ch1,1);
-	    ch2=(char)last_cw_keyer_speed; snd_rawmidi_write(output,&ch2,1);
-	    g_print("%s: Sending MIDI Speed Cmd to Keyer: %d %d %d\n",__FUNCTION__, ch, ch1, ch2);
-	    snd_rawmidi_drain(output);
+	    //CW Speed #4	    
+        sprintf(midi_cmd, "%c%c%c", 177, 4, (char)last_cw_keyer_speed); 
+	    snd_rawmidi_write(output,&midi_cmd,3);	    
+        g_print("%s: Sending MIDI Speed Cmd to Keyer: Evt:0x%02hX Chan:0x%02hX Note:0x%02hX Last:%d\n",__FUNCTION__, 177, 4, last_cw_keyer_speed, last_cw_keyer_speed);
 	}
 	if(cw_keyer_sidetone_volume != last_cw_keyer_sidetone_volume) {
 	    last_cw_keyer_sidetone_volume = cw_keyer_sidetone_volume;
-	    // Set Sidetone Level
-	    lsb_val = (char) (last_cw_keyer_sidetone_volume & 0x0F);
-	    msb_val = (char) (last_cw_keyer_sidetone_volume & 0xF0);
-	    ch=177; snd_rawmidi_write(output,&ch,1);
-	    ch1=0;  snd_rawmidi_write(output,&ch1,1);
-	    ch2=msb_val;  snd_rawmidi_write(output,&ch2,1);
-	    g_print("%s: Sending MIDI Sidetone Level Cmd #1 to Keyer: %d %d %d\n",__FUNCTION__, ch, ch1, ch2);
-	    snd_rawmidi_drain(output);	
-	    sleep(1);
-	    ch=177; snd_rawmidi_write(output,&ch,1);
-	    ch1=5;  snd_rawmidi_write(output,&ch1,1);
-	    ch2=lsb_val;  snd_rawmidi_write(output,&ch2,1);
-	    g_print("%s: Sending MIDI Sidetone Level Cmd #2 to Keyer:%d %d %d\n",__FUNCTION__, ch, ch1, ch2);
-	    snd_rawmidi_drain(output);
+	    // Set Sidetone Level #5 - Teensy side divides value sent by 16384 and needs 0 to 1.0 at the end.
+	    // our range is 0 to 127 so lsb will always be 0.  Meed to scale 0 to 127 to 0 to 16384
+        // 128 is technically correct number but is too loud. 16 seems to work best. 
+	    unsigned int val = (cw_keyer_sidetone_volume * 16);       
+        lsb_val = (unsigned char) ( val & 0xFF);
+        msb_val = (unsigned char) ((val >> 7) & 0x7F);  // The Teensy code is ony shifting 7 bits not 8.
+        
+	    g_print("%s: Evt:%02hX MSB: %02hX LSB: %02hX Val: %d\n", __FUNCTION__, 177, msb_val, lsb_val, last_cw_keyer_sidetone_volume);
+	    // Send the expected 16bit value with lsb first
+        sprintf(midi_cmd, "%c%c%c", 177, 0, (char)lsb_val); 
+	    snd_rawmidi_write(output,&midi_cmd,3);
+	    g_print("%s: Sending MIDI Sidetone Level Cmd msb to Keyer: Evt:0x%02hX Chan:0x%02hX Note:0x%02hX Last:%d\n",__FUNCTION__, 177, 0, msb_val, last_cw_keyer_sidetone_volume);
+	    sprintf(midi_cmd, "%c%c%c", 177, 5, (char)msb_val); 
+	    snd_rawmidi_write(output,&midi_cmd,3);
+	    g_print("%s: Sending MIDI Sidetone Level Cmd lsb to Keyer: Evt:0x%02hX Chan:0x%02hX Note:0x%02hX Last:%d\n",__FUNCTION__, 177, 5, lsb_val, last_cw_keyer_sidetone_volume);
 	}
 	if(cw_keyer_sidetone_frequency != last_cw_keyer_sidetone_frequency) {
 	    last_cw_keyer_sidetone_frequency = cw_keyer_sidetone_frequency;
-	    // Sidetone Pitch - 100 to 1000 for piHPSDR CW menu range
-	    int val = (last_cw_keyer_sidetone_frequency); 
-	    val = val/127; // 1000/7 = 0 to 127
-	    lsb_val = (char) (val & 0x0F);
-	    msb_val = (char) (val & 0xF0);
-	    ch=177; snd_rawmidi_write(output,&ch,1);
-	    ch1=0;  snd_rawmidi_write(output,&ch1,1);
-	    ch2=msb_val;  snd_rawmidi_write(output,&ch2,1);
-	    g_print("%s: Sending MIDI Sidetone Pitch Cmd #1 to Keyer: %d %d %d\n",__FUNCTION__, ch, ch1, ch2);
-	    snd_rawmidi_drain(output);	
-	    sleep(1);
-	    ch=177; snd_rawmidi_write(output,&ch,1);
-	    ch1=6;  snd_rawmidi_write(output,&ch1,1);
-	    ch2=lsb_val;  snd_rawmidi_write(output,&ch2,1);
-	    g_print("%s: Sending MIDI Sidetone Pitch Cmd #2 to Keyer:%d %d %d\n",__FUNCTION__, ch, ch1, ch2);
-	    snd_rawmidi_drain(output);
+	    // Sidetone Pitch #6 - 100 to 1000 for piHPSDR CW menu range
+	    //unsigned int val = (last_cw_keyer_sidetone_frequency); 
+	    //val = val/127; // 1000/7 = 0 to 127	    
+        //msb_val = (char) (val << 8) & 0xFF00;
+	    //msb_val = (char) (val & 0xFF00);
+        //g_print("%s: Val: %d\n", __FUNCTION__, val); 
+        lsb_val = (unsigned char)  (last_cw_keyer_sidetone_frequency & 0xFF);
+        msb_val = (unsigned char) ((last_cw_keyer_sidetone_frequency >> 7) & 0x7F);
+        
+        g_print("%s: Evt:%02hX MSB: %02hX LSB: %02hX Val: %d\n", __FUNCTION__, 177, msb_val, lsb_val, last_cw_keyer_sidetone_frequency);
+        // Send the expected 16bit value with msb first then lsb
+        sprintf(midi_cmd, "%c%c%c", 177, 0, (char)lsb_val); 
+	    snd_rawmidi_write(output,&midi_cmd,3);
+        g_print("%s: Sending MIDI Sidetone Pitch Cmd msb to Keyer: Evt:0x%02hX Chan:0x%02hX Note:0x%02hX Last:%d\n",__FUNCTION__, 177, 0, msb_val, last_cw_keyer_sidetone_frequency);
+        sprintf(midi_cmd, "%c%c%c", 177, 6, (char)msb_val); 
+	    snd_rawmidi_write(output,&midi_cmd,3);
+        g_print("%s: Sending MIDI Sidetone Pitch Cmd lsb to Keyer: Evt:0x%02hX Chan:0x%02hX Note:0x%02hX Last:%d\n",__FUNCTION__, 177, 6, lsb_val, last_cw_keyer_sidetone_frequency);
 	}
-	
-	/*
-	if(volumexxx != last_volumexxxxx) {
-	* last_volumexxxxx = volumexxxxx;
-	    // Main Volume in Keyer Audio
-	    // active_receiver->id,value 
-	    lsb_val = (char) (XXXXXX & 0x0F);
-	    msb_val = (char) (XXXXXX & 0xF0);
-	    ch=177; snd_rawmidi_write(output,&ch,1);
-	    ch1=0;  snd_rawmidi_write(output,&ch1,1);
-	    ch2=msb_val;  snd_rawmidi_write(output,&ch2,1);
-	    g_print("%s: Sending MIDI USB Audio Volume Cmd #1 to Keyer: %d %d %d\n",__FUNCTION__, ch, ch1, ch2);
-	    snd_rawmidi_drain(output);	
-	    sleep(1);
-	    ch=177; snd_rawmidi_write(output,&ch,1);
-	    ch1=16;  snd_rawmidi_write(output,&ch1,1);
-	    ch2=lsb_val;  snd_rawmidi_write(output,&ch2,1);
-	    g_print("%s: Sending MIDI USB Audio Volume Cmd #2 to Keyer:%d %d %d\n",__FUNCTION__, ch, ch1, ch2);
-	    snd_rawmidi_drain(output);	
-	}
-	*/	
 	// Continue on with RX events    
     
 	ret = poll(pfds, npfds, 250);
