@@ -227,6 +227,49 @@ static inline double KnobOrWheel(PROCESS_ACTION *a, double oldval, double minval
   return oldval;
 }
 
+//
+// This interface puts an "action" into the GTK idle queue,
+// but CW actions are processed immediately
+//
+void schedule_action(enum ACTION action, enum ACTION_MODE mode, gint val) {
+  PROCESS_ACTION *a;
+  switch (action) {
+    case CW_LEFT:
+    case CW_RIGHT:
+#ifdef LOCALCW
+      keyer_event(action==CW_LEFT,val);
+#else
+      g_print("CW_Left/Right but compiled without LOCALCW\n");
+#endif
+      break;
+    case CW_KEYER:
+      //
+      // hard "key-up/down" action WITHOUT break-in
+      // intended for external keyers (MIDI or GPIO connected)
+      // which take care of PTT themselves
+      //
+      if (val != 0 && cw_keyer_internal == 0) {
+        cw_key_down=960000;  // max. 20 sec to protect hardware
+        cw_key_up=0;
+        cw_key_hit=1;
+      } else {
+        cw_key_down=0;
+        cw_key_up=0;
+      }
+      break;
+    default:
+      //
+      // schedule action through GTK idle queue
+      //
+      a=g_new(PROCESS_ACTION, 1);
+      a->action=action;
+      a->mode=mode;
+      a->val=val;
+      g_idle_add(process_action, a);
+      break;
+  }
+}
+
 int process_action(void *data) {
   PROCESS_ACTION *a=(PROCESS_ACTION *)data;
   double value;
@@ -270,7 +313,7 @@ int process_action(void *data) {
         if(active_receiver->agc>+AGC_LAST) {
           active_receiver->agc=0;
         }
-        set_agc(active_receiver);
+        set_agc(active_receiver, active_receiver->agc);
         g_idle_add(ext_vfo_update, NULL);
       }
       break;
@@ -521,26 +564,14 @@ int process_action(void *data) {
       }
       break;
     case CW_FREQUENCY:
-#ifdef LOCALCW
-      value=KnobOrWheel(a, (double)cw_keyer_sidetone_frequency, 300.0, 1000.0, 10.0);
+      value=KnobOrWheel(a, (double)cw_keyer_sidetone_frequency, 400.0, 1000.0, 10.0);
       cw_keyer_sidetone_frequency=(int)value;
       g_idle_add(ext_vfo_update,NULL);
-#endif
-      break;
-    case CW_LEFT:
-    case CW_RIGHT:
-      if(a->mode==PRESSED || a->mode==RELEASED) {
-#ifdef LOCALCW
-        keyer_event(a->action==CW_LEFT,a->mode==PRESSED);
-#endif
-      }
       break;
     case CW_SPEED:
-#ifdef LOCALCW
       value=KnobOrWheel(a, (double)cw_keyer_speed, 1.0, 60.0, 1.0);
       cw_keyer_speed=(int)value;
       g_idle_add(ext_vfo_update,NULL);
-#endif
       break;
     case DIV:
       if(a->mode==PRESSED) {
@@ -726,19 +757,8 @@ int process_action(void *data) {
       break;
     case MOX:
       if(a->mode==PRESSED) {
-        if(getTune()==1) {
-          setTune(0);
-        }
-        if(getMox()==0) {
-          if(canTransmit() || tx_out_of_band) {
-            setMox(1);
-          } else {
-            transmitter_set_out_of_band(transmitter);
-          }
-        } else {
-          setMox(0);
-        }
-        g_idle_add(ext_vfo_update,NULL);
+        int state=getMox();
+        mox_update(!state);
       }
       break;
     case MUTE:
@@ -1002,10 +1022,7 @@ int process_action(void *data) {
       break;
     case SPLIT:
       if(a->mode==PRESSED) {
-        if(can_transmit) {
-          set_split(split==1?0:1);
-          g_idle_add(ext_vfo_update, NULL);
-        }
+        g_idle_add(ext_split_toggle, NULL);
       }
       break;
     case SQUELCH:
@@ -1035,19 +1052,8 @@ int process_action(void *data) {
       break;
     case TUNE:
       if(a->mode==PRESSED) {
-        if(getMox()==1) {
-          setMox(0);
-        }
-        if(getTune()==0) {
-          if(canTransmit() || tx_out_of_band) {
-            setTune(1);
-          } else {
-            transmitter_set_out_of_band(transmitter);
-          }
-        } else {
-          setTune(0);
-        }
-        g_idle_add(ext_vfo_update,NULL);
+        int state=getTune();
+        tune_update(!state);
       }
       break;
     case TUNE_DRIVE:
