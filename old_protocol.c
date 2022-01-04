@@ -869,7 +869,7 @@ static void process_control_bytes() {
 
   if (cw_keyer_internal) {
     // Stops CAT cw transmission if paddle hit in "internal" CW
-    if ((dash || dot)) cw_key_hit=1;
+    if (dash || dot) cw_key_hit=1;
   } else {
 #ifdef LOCALCW
     //
@@ -1194,7 +1194,7 @@ static void process_ozy_input_buffer(unsigned char  *buffer) {
       if (avail >= 1008) {
         //
         // ship out two buffers with 2*63 samples
-        // the i-loop could be done with 1-2 memcpy
+        // the k-loop could be done with 1-2 memcpy
         //
         for (int j=0; j<2; j++) {
           unsigned char *p=output_buffer+8;

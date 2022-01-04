@@ -680,11 +680,8 @@ g_print("create_visual: calling radio_change_receivers: receivers=%d r=%d\n",rec
   
 void start_radio() {
   int i;
-  int y;
 //g_print("start_radio: selected radio=%p device=%d\n",radio,radio->device);
   gdk_window_set_cursor(gtk_widget_get_window(top_window),gdk_cursor_new(GDK_WATCH));
-
-  int rc;
 
   protocol=radio->protocol;
   device=radio->device;
@@ -1158,7 +1155,6 @@ void start_radio() {
   adc[0].gain=rx_gain_calibration;
   adc[0].min_gain=0.0;
   adc[0].max_gain=100.0;
-  adc[0].antenna=0;
   dac[0].antenna=1;
   dac[0].gain=0;
 
@@ -1193,7 +1189,6 @@ void start_radio() {
   adc[1].gain=rx_gain_calibration;
   adc[1].min_gain=0.0;
   adc[1].max_gain=100.0;
-  adc[1].antenna=0;
   dac[1].antenna=1;
   dac[1].gain=0;
 
@@ -1551,6 +1546,10 @@ static void rxtx(int state) {
         gtk_fixed_put(GTK_FIXED(fixed),receiver[i]->panel,receiver[i]->x,receiver[i]->y);
         SetChannelState(receiver[i]->id,1,0);
         set_displaying(receiver[i],1);
+        receiver[i]->rxcount=0;
+        receiver[i]->maxcount=-1;
+	// if not duplex, clear RX iq buffer
+        receiver[i]->samples=0;
       }
     }
   }
@@ -1907,19 +1906,16 @@ void set_attenuation(int value) {
     }
 }
 
-//
-// Upon each band change, the TX mode needs be specified again.
-// For HPSDR, one also needs new RX/TX antenna and PA calibration/disable settings.
-// For TX, this must also happen when changing the active receiver or the "split" status.
-// To avoid code duplications, the necessary actions are bundled here.
-// If the attenuation is stored with the band, this should also be adjusted here
-//
-void radio_band_changed() {
+void set_alex_antennas() {
+  //
+  // Obtain band of VFO-A and transmitter, set ALEX RX/TX antennas
+  // and the step attenuator
+  // This function is a no-op when running SOAPY.
+  // This function also takes care of updating the PA dis/enable
+  // status for P2.
+  //
   BAND *band;
   if (protocol == ORIGINAL_PROTOCOL || protocol == NEW_PROTOCOL) {
-    //
-    // Obtain band of VFO-A and transmitter, set ALEX RX/TX antennas
-    //
     band=band_get_band(vfo[VFO_A].band);
     receiver[0]->alex_antenna=band->alexRxAntenna;
     receiver[0]->alex_attenuation=band->alexAttenuation;
@@ -1929,26 +1925,44 @@ void radio_band_changed() {
       transmitter->alex_antenna=band->alexTxAntenna;
     }
   }
-  if (can_transmit) {
-    tx_set_mode(transmitter,get_tx_mode());
-    calcDriveLevel();
-  }
-
   if (protocol == NEW_PROTOCOL) {
     schedule_high_priority();         // possibly update RX/TX antennas
     schedule_general();               // possibly update PA disable
   }
 }
 
-//
-// For HPSDR, only receiver[0]->alex_attenuation has an effect
-//
+void tx_vfo_changed() {
+  //
+  // When changing the active receiver or changing the split status,
+  // the VFO that controls the transmitter my flip between VFOA/VFOB.
+  // In these cases, we have to update the TX mode,
+  // and re-calculate the drive level from the band-specific PA calibration
+  // values. For SOAPY, the only thing to do is the update the TX mode.
+  //
+  // Note each time tx_vfo_changed() is called, calling set_alex_antennas()
+  // is also due.
+  //
+  if (can_transmit) {
+    tx_set_mode(transmitter,get_tx_mode());
+    calcDriveLevel();
+  }
+  if (protocol == NEW_PROTOCOL) {
+    schedule_high_priority();         // possibly update RX/TX antennas
+    schedule_general();               // possibly update PA disable
+  }
+}
+
 void set_alex_attenuation(int v) {
+    //
+    // Change the value of the step attenuator. Store it
+    // in the "band" data structure of the current band,
+    // and in the receiver[0] data structure
+    //
     BAND *band;
     if (protocol == ORIGINAL_PROTOCOL || protocol == NEW_PROTOCOL) {
       //
-      // Store new attenuation value in band data structure
-      // Note this is the "old" step-attenuator 10/20/30 dB
+      // Store new value of the step attenuator in band data structure
+      // (v can be 0,1,2,3)
       //
       band=band_get_band(vfo[VFO_A].band);
       band->alexAttenuation=v;
@@ -1959,13 +1973,16 @@ void set_alex_attenuation(int v) {
     }
 }
 
-//
-// Interface to set split state
-//
 void radio_set_split(int val) {
+  //
+  // "split" *must only* be set through this interface,
+  // since it may change the TX band and thus requires
+  // tx_vfo_changed() and set_alex_antennas().
+  //
   if (can_transmit) {
     split=val;
-    radio_band_changed();
+    tx_vfo_changed();
+    set_alex_antennas();
     g_idle_add(ext_vfo_update, NULL);
   }
 }
