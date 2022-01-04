@@ -94,7 +94,11 @@ void receiver_set_active(RECEIVER *rx) {
   g_idle_add(ext_vfo_update,NULL);
   g_idle_add(zoompan_active_receiver_changed,NULL);
   g_idle_add(sliders_active_receiver_changed,NULL);
-  radio_band_changed();
+  //
+  // Changing the active receiver flips the TX vfo
+  //
+  tx_vfo_changed();
+  set_alex_antennas();
 }
 
 gboolean receiver_button_release_event(GtkWidget *widget, GdkEventButton *event, gpointer data) {
@@ -1234,6 +1238,8 @@ g_print("%s: rx=%p id=%d local_audio=%d\n",__FUNCTION__,rx,rx->id,rx->local_audi
 
   // defer set_agc until here, otherwise the AGC threshold is not computed correctly
   set_agc(rx, rx->agc);
+
+  rx->rxcount=99999;
   return rx;
 }
 
@@ -1246,6 +1252,7 @@ void receiver_change_sample_rate(RECEIVER *rx,int sample_rate) {
   g_mutex_lock(&rx->mutex);
 
   rx->sample_rate=sample_rate;
+  rx->samples=0;  // clear RX iq buffer
   int scale=rx->sample_rate/48000;
   rx->output_samples=rx->buffer_size/scale;
   rx->hz_per_pixel=(double)rx->sample_rate/(double)rx->width;
@@ -1492,6 +1499,20 @@ static int rx_buffer_seen=0;
 static int tx_buffer_seen=0;
 
 void add_iq_samples(RECEIVER *rx, double i_sample,double q_sample) {
+
+  if (rx->rxcount <= 20000) {
+    if (i_sample*i_sample + q_sample*q_sample > 0.01) rx->maxcount=rx->rxcount;
+    if (rx->rxcount < (int)(rx->sample_rate >> 5)) {
+      i_sample=0.0;
+      q_sample=0.0;
+    }
+    if (rx->rxcount == 20000) {
+      fprintf(stderr,"ID=%d MAXCOUNT=%d\n", rx->id, rx->maxcount);
+      rx->rxcount = 99999;
+    }
+    rx->rxcount++;
+  }
+
   rx->iq_input_buffer[rx->samples*2]=i_sample;
   rx->iq_input_buffer[(rx->samples*2)+1]=q_sample;
   rx->samples=rx->samples+1;

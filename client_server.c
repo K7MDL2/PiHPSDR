@@ -193,7 +193,6 @@ void remote_audio(RECEIVER *rx,short left_sample,short right_sample) {
 static gint send_spectrum(void *arg) {
   REMOTE_CLIENT *client=(REMOTE_CLIENT *)arg;
   float *samples;
-  double sample;
   short s;
   SPECTRUM_DATA spectrum_data;
   gint result;
@@ -1739,10 +1738,7 @@ g_print("send_mute_rx mute=%d\n",mute);
 
 
 static void *listen_thread(void *arg) {
-  int address_length;
   struct sockaddr_in address;
-  REMOTE_CLIENT* client;
-  int rc;
   int on=1;
 
 g_print("hpsdr_server: listening on port %d\n",listen_port);
@@ -1855,9 +1851,6 @@ g_print("check_vfo_timer_id %d\n",check_vfo_timer_id);
 
 static void *client_thread(void* arg) {
   gint bytes_read;
-#define MAX_BUFFER 2400
-  char buffer[MAX_BUFFER];
-  char *token;
   HEADER header;
   char *server=(char *)arg;
 
@@ -1906,8 +1899,9 @@ g_print("INFO_RADIO: %d\n",bytes_read);
         locked=radio_data.locked;
         receivers=ntohs(radio_data.receivers);
         can_transmit=radio_data.can_transmit;
-//TEMP
-can_transmit=0;
+
+	can_transmit=0;  // forced temporarily until Client/Server supports transmitters
+
         step=ntohll(radio_data.step);
         split=radio_data.split;
         sat_mode=radio_data.sat_mode;
