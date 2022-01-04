@@ -268,8 +268,6 @@ fprintf(stderr,"soapy_protocol_stop_transmitter: deactivateStream\n");
 void soapy_protocol_init(gboolean hf) {
   SoapySDRKwargs args={};
   char temp[32];
-  int rc;
-  int i;
 
 
   SoapySDR_setLogLevel(SOAPY_SDR_TRACE);
@@ -408,8 +406,18 @@ void soapy_protocol_iq_samples(float isample,float qsample) {
   long long timeNs=0;
   long timeoutUs=100000L;
   if(isTransmitting()) {
-    output_buffer[(output_buffer_index*2)]=isample;
-    output_buffer[(output_buffer_index*2)+1]=qsample;
+    //
+    // The "iqswap" logic has now been removed  from transmitter.c
+    // and moved here, because this is where it is also handled
+    // upon RX.
+    //
+    if (iqswap) {
+      output_buffer[(output_buffer_index*2)]=qsample;
+      output_buffer[(output_buffer_index*2)+1]=isample;
+    } else {
+      output_buffer[(output_buffer_index*2)]=isample;
+      output_buffer[(output_buffer_index*2)+1]=qsample;
+    }
     output_buffer_index++;
     if(output_buffer_index>=max_tx_samples) {
       int elements=SoapySDRDevice_writeStream(soapy_device,tx_stream,tx_buffs,max_tx_samples,&flags,timeNs,timeoutUs);

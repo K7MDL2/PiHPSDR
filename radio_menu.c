@@ -241,6 +241,9 @@ void setDuplex() {
 
 static void PA_enable_cb(GtkWidget *widget, gpointer data) {
   pa_enabled=gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
+  if (protocol == NEW_PROTOCOL) {
+    schedule_general();
+  }
 }
 
 static void duplex_cb(GtkWidget *widget, gpointer data) {
@@ -291,8 +294,7 @@ void load_filters(void) {
     case APOLLO:
     case CHARLY25:
         // This is most likely not necessary here, but can do no harm
-        set_alex_rx_antenna();
-        set_alex_tx_antenna();
+        set_alex_antennas();
         break;
     case NONE:
         break;
@@ -304,7 +306,7 @@ void load_filters(void) {
   // schedule "General" and "HighPrio" packets for P2
   //
   if(protocol==NEW_PROTOCOL) {
-    filter_board_changed();
+    schedule_general();
     schedule_high_priority();
   }
   //
@@ -573,7 +575,7 @@ void radio_menu(GtkWidget *parent) {
         }
         g_signal_connect(sample_rate_combo_box,"changed",G_CALLBACK(sample_rate_cb),radio);
         gtk_grid_attach(GTK_GRID(grid),sample_rate_combo_box,col,row,1,1);
-        row++;
+	row++;
       } else {
         GtkWidget *sample_rate_label=gtk_label_new(NULL);
         gtk_label_set_markup(GTK_LABEL(sample_rate_label), "<b>Sample Rate:</b>");
@@ -845,23 +847,20 @@ void radio_menu(GtkWidget *parent) {
     GtkWidget *rx_gain_label=gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(rx_gain_label), "<b>RX Gain Calibration:</b>");
     gtk_grid_attach(GTK_GRID(grid),rx_gain_label,col,row,1,1);
+
     col++;
-    
     GtkWidget *rx_gain_calibration_b=gtk_spin_button_new_with_range(-50.0,50.0,1.0);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(rx_gain_calibration_b),(double)rx_gain_calibration);
     gtk_grid_attach(GTK_GRID(grid),rx_gain_calibration_b,col,row,1,1);
     g_signal_connect(rx_gain_calibration_b,"value_changed",G_CALLBACK(rx_gain_calibration_value_changed_cb),NULL);
-    col++;
-
-    if ((protocol == ORIGINAL_PROTOCOL && device == DEVICE_HERMES_LITE2) ||
-        (protocol == NEW_PROTOCOL      && device == NEW_DEVICE_HERMES_LITE2)) {
-        GtkWidget *PA_enable_b=gtk_check_button_new_with_label("HL2 PA enable");
-        gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (PA_enable_b), pa_enabled);
-        gtk_grid_attach(GTK_GRID(grid),PA_enable_b,col,row,1,1);
-        g_signal_connect(PA_enable_b,"toggled",G_CALLBACK(PA_enable_cb),NULL);
-    }
-
   }
+
+  col++;
+  GtkWidget *PA_enable_b=gtk_check_button_new_with_label("PA enable");
+  gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (PA_enable_b), pa_enabled);
+  gtk_grid_attach(GTK_GRID(grid),PA_enable_b,col,row,1,1);
+  g_signal_connect(PA_enable_b,"toggled",G_CALLBACK(PA_enable_cb),NULL);
+
   row++;
 
   if(row>temp_row) temp_row=row;

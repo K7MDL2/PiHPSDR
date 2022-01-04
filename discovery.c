@@ -71,12 +71,14 @@ GtkWidget *host_addr_entry;
 static char host_addr_buffer[128]="g0orx.ddns.net";
 char *host_addr = &host_addr_buffer[0];
 GtkWidget *host_port_spinner;
-gint host_port=45000;
+gint host_port=50000;  // default listening port
 #endif
 
 //
 // This is a variable for the second phase of STEMlab discovery.
-// Here we know we have a stemlab and will re-discover only P1
+// If set, we already have detected + selected the STEMlab,
+// started the SDR app on the RedPitaya and run a "P1 only"
+// discovery to obtain data from the SDR app
 //
 static int discover_only_p1 = 0;
 
@@ -91,13 +93,12 @@ static gboolean start_cb (GtkWidget *widget, GdkEventButton *event, gpointer dat
   // we otherwise lose the information about which app has been selected.
   if (radio->protocol == STEMLAB_PROTOCOL) {
     const int device_id = radio - discovered;
-    int ret;
     if (radio->software_version & BARE_REDPITAYA) {
 	// Start via the simple web interface
-	ret=alpine_start_app(gtk_combo_box_get_active_id(GTK_COMBO_BOX(apps_combobox[device_id])));
+	(void) alpine_start_app(gtk_combo_box_get_active_id(GTK_COMBO_BOX(apps_combobox[device_id])));
     } else {
 	// Start via the STEMlab "bazaar" interface
-	ret=stemlab_start_app(gtk_combo_box_get_active_id(GTK_COMBO_BOX(apps_combobox[device_id])));
+	(void) stemlab_start_app(gtk_combo_box_get_active_id(GTK_COMBO_BOX(apps_combobox[device_id])));
     }
     //
     // To make this bullet-proof, we do another "discover" now
@@ -237,7 +238,7 @@ void discovery() {
 #endif
 
 #ifdef STEMLAB_DISCOVERY
-  if(enable_stemlab && ! discover_only_p1) {
+  if(enable_stemlab && !discover_only_p1) {
 #ifdef NO_AVAHI
     status_text("Looking for STEMlab WEB apps");
 #else
@@ -252,13 +253,13 @@ void discovery() {
     old_discovery();
   }
 
-  if(enable_protocol_2 && ! discover_only_p1) {
+  if(enable_protocol_2 && !discover_only_p1) {
     status_text("Protocol 2 ... Discovering Devices");
     new_discovery();
   }
 
 #ifdef SOAPYSDR
-  if(enable_soapy_protocol && ! discover_only_p1) {
+  if(enable_soapy_protocol && !discover_only_p1) {
     status_text("SoapySDR ... Discovering Devices");
     soapy_discovery();
   }
@@ -367,7 +368,7 @@ fprintf(stderr,"%p Protocol=%d name=%s\n",d,d->protocol,d->name);
         gtk_widget_override_font(start_button, pango_font_description_from_string("Sans 16"));
         gtk_widget_show(start_button);
         gtk_grid_attach(GTK_GRID(grid),start_button,3,row,1,1);
-        g_signal_connect(start_button,"button_press_event",G_CALLBACK(start_cb),(gpointer)d);
+        g_signal_connect(start_button,"button-press-event",G_CALLBACK(start_cb),(gpointer)d);
 
         // if not available then cannot start it
         if(d->status!=STATE_AVAILABLE) {
@@ -380,21 +381,22 @@ fprintf(stderr,"%p Protocol=%d name=%s\n",d,d->protocol,d->name);
 #endif
           // if not on the same subnet then cannot start it
 	  //
-	  // DL1YCF: APIPA modification
-	  // so-called APIPA addresses are of the numerical form 169.254.xxx.yyy and these addresses are used
-	  // by many radios if they do not get a DHCP address. These addresses are valid even if outside the
-	  // netmask of the (physical) interface making the connection - so do not complain in this case!
-	  //
-	  // If the radio has a valid IP address but the computer only has an APIPA address, this also
-	  // leads to a radio address outside the netmask and can be ignored.
-	  //
+          // NOTE: self-assigned IP  (a.k.a. APIPA) addresses
+          // these addresses are of the numerical form 169.254.xxx.yyy and used
+          // by many radios if they do not get a DHCP address. These addresses are valid even if outside the
+          // netmask of the (physical) interface making the connection - so do not complain in this case!
+          //
+          // If the radio has a valid IP address but the computer only has an APIPA address, this also
+          // leads to a radio address outside the netmask and can be ignored. So if either the radio
+          // or the interface address starts with 169.254., suppress "Subnet!" complaint.
+          //
           if (strncmp(inet_ntoa(d->info.network.address.sin_addr),"169.254.",8) &&
               strncmp(inet_ntoa(d->info.network.interface_address.sin_addr),"169.254.",8)) {
             if((d->info.network.interface_address.sin_addr.s_addr&d->info.network.interface_netmask.sin_addr.s_addr) != (d->info.network.address.sin_addr.s_addr&d->info.network.interface_netmask.sin_addr.s_addr)) {
               gtk_button_set_label(GTK_BUTTON(start_button),"Subnet!");
               gtk_widget_set_sensitive(start_button, FALSE);
             }
-	  }
+          }
 #ifdef SOAPYSDR
         }
 #endif
@@ -486,6 +488,7 @@ fprintf(stderr,"%p Protocol=%d name=%s\n",d,d->protocol,d->name);
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio),NULL,"Controller1");
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio),NULL,"Controller2 V1");
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio),NULL,"Controller2 V2");
+    //gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio),NULL,"Controller I2C");
     gtk_grid_attach(GTK_GRID(grid),gpio,0,row,1,1);
 
     gtk_combo_box_set_active(GTK_COMBO_BOX(gpio),controller);

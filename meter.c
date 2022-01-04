@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <math.h>
 
+#include "band.h"
 #include "receiver.h"
 #include "meter.h"
 #include "radio.h"
@@ -140,7 +141,7 @@ fprintf(stderr,"meter_init: width=%d height=%d\n",width,height);
 }
 
 
-void meter_update(RECEIVER *rx,int meter_type,double value,double reverse,double alc,double swr) {
+void meter_update(RECEIVER *rx,int meter_type,double value,double reverse,double exciter,double alc,double swr) {
   
   double level;
   char sf[32];
@@ -149,42 +150,46 @@ void meter_update(RECEIVER *rx,int meter_type,double value,double reverse,double
   char *units="W";
   double interval=10.0;
   cairo_t *cr = cairo_create (meter_surface);
+  BAND *band=band_get_current_band();
 
   if(meter_type==POWER) {
     level=value;
-    switch(pa_power) {
-      case PA_1W:
-        units="mW";
-        interval=100.0;
-        level=level*1000.0;
-        reverse=reverse*1000;  // scale reverse as well to get correct SWR
-        break;
-      case PA_10W:
-        interval=1.0;
-        break;
-      case PA_30W:
-        interval=3.0;
-        break;
-      case PA_50W:
-        interval=5.0;
-        break;
-      case PA_100W:
-        interval=10.0;
-        break;
-      case PA_200W:
-        interval=20.0;
-        break;
-      case PA_500W:
-        interval=50.0;
-        break;
+    if(level==0.0 || band->disablePA || !pa_enabled) {
+      level=exciter;
+    }
+    if(band->disablePA || !pa_enabled) {
+      units="mW";
+      interval=100.0;
+      level=level*1000.0;
+    } else {
+      switch(pa_power) {
+        case PA_1W:
+          units="mW";
+          interval=100.0;
+          level=level*1000.0;
+          break;
+        case PA_10W:
+          interval=1.0;
+          break;
+        case PA_30W:
+          interval=3.0;
+          break;
+        case PA_50W:
+          interval=5.0;
+          break;
+        case PA_100W:
+          interval=10.0;
+          break;
+        case PA_200W:
+          interval=20.0;
+          break;
+        case PA_500W:
+          interval=50.0;
+          break;
+      }
     }
   }
 
-//
-// DL1YCF
-// there is a lot of code repetition in the analog and digital meter cases
-// which should be unified.
-//
 if(analog_meter) {
   cairo_set_source_rgb (cr, 0.0, 0.0, 0.0);
   cairo_paint (cr);
@@ -194,19 +199,7 @@ if(analog_meter) {
   switch(meter_type) {
     case SMETER:
       {
-      level=value + (double)rx_gain_calibration + (double)adc[rx->adc].attenuation - adc[rx->adc].gain;
-      if (filter_board == CHARLY25) {
-	// preamp/dither encodes the preamp level
-        if (rx->preamp) level -= 18.0;
-        if (rx->dither) level -= 18.0;
-      }
-      //
-      // Assume that alex_attenuation is set correctly if we have an ALEX board
-      //
-      if (filter_board == ALEX && rx->adc == 0) {
-	level += 10*rx->alex_attenuation;
-      }
-	    
+      level=value;  // all corrections now in receiver.c
       offset=210.0;
 
       int i;
@@ -326,29 +319,35 @@ if(analog_meter) {
 
       char *units="W";
       double interval=10.0;
-      switch(pa_power) {
-        case PA_1W:
-          units="mW";
-          interval=100.0;
-          break;
-        case PA_10W:
-          interval=1.0;
-          break;
-        case PA_30W:
-          interval=3.0;
-          break;
-        case PA_50W:
-          interval=5.0;
-          break;
-        case PA_100W:
-          interval=10.0;
-          break;
-        case PA_200W:
-          interval=20.0;
-          break;
-        case PA_500W:
-          interval=50.0;
-          break;
+
+      if(band->disablePA || !pa_enabled) {
+        units="mW";
+        interval=100.0;
+      } else {
+        switch(pa_power) {
+          case PA_1W:
+            units="mW";
+            interval=100.0;
+            break;
+          case PA_10W:
+            interval=1.0;
+            break;
+          case PA_30W:
+            interval=3.0;
+            break;
+          case PA_50W:
+            interval=5.0;
+            break;
+          case PA_100W:
+            interval=10.0;
+            break;
+          case PA_200W:
+            interval=20.0;
+            break;
+          case PA_500W:
+            interval=50.0;
+            break;
+        }
       }
 
       for(i=0;i<=100;i++) {
@@ -432,7 +431,8 @@ if(analog_meter) {
 
 
       cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
-      sprintf(sf,"%0.1f %s",max_level,units);
+      //sprintf(sf,"%0.1f%s",max_level,units);
+      sprintf(sf,"%d%s",(int)max_level,units);
       cairo_move_to(cr, 80, meter_height-22);
       cairo_show_text(cr, sf);
 
@@ -553,18 +553,7 @@ if(analog_meter) {
       // value is dBm
       text_location=10;
       offset=5.0;
-      level=value + (double)rx_gain_calibration + (double)adc[rx->adc].attenuation - adc[rx->adc].gain;
-      if (filter_board == CHARLY25) {
-	// preamp/dither encodes the preamp level
-        if (rx->preamp) level -= 18.0;
-        if (rx->dither) level -= 18.0;
-      }
-      //
-      // Assume that alex_attenuation is set correctly if we have an ALEX board
-      //
-      if (filter_board == ALEX && rx->adc == 0) {
-	level += 10*rx->alex_attenuation;
-      }
+      level=value;  // all corrections now in receiver.c
 
       if(meter_width>=114) {
         int db=1;
@@ -657,30 +646,35 @@ if(analog_meter) {
             CAIRO_FONT_WEIGHT_BOLD);
       cairo_set_font_size(cr, DISPLAY_FONT_SIZE2);
 
-      if(level>max_level || max_count==10) {
+      if (protocol == ORIGINAL_PROTOCOL || protocol == NEW_PROTOCOL) {
+	//
+	// Power levels not available for Soapy
+	//
+        if(level>max_level || max_count==10) {
           max_level=level;
           max_count=0;
-      }
-      max_count++;
+        }
+        max_count++;
 
-      sprintf(sf,"FWD: %0.1f %s",max_level,units);
-      cairo_move_to(cr, 10, 35);
-      cairo_show_text(cr, sf);
+        sprintf(sf,"FWD: %d%s",(int)max_level,units);
+        cairo_move_to(cr, 10, 35);
+        cairo_show_text(cr, sf);
 
-      if (swr > transmitter->swr_alarm) {
-        cairo_set_source_rgb(cr, 1.0, 0.2, 0.0);  // display SWR in red color
-      } else {
-        cairo_set_source_rgb (cr, 1.0, 1.0, 1.0); // display SWR in white color
-      }
+        if (swr > transmitter->swr_alarm) {
+          cairo_set_source_rgb(cr, 1.0, 0.2, 0.0);  // display SWR in red color
+        } else {
+          cairo_set_source_rgb (cr, 1.0, 1.0, 1.0); // display SWR in white color
+        }
 
 
-      cairo_select_font_face(cr, DISPLAY_FONT,
+        cairo_select_font_face(cr, DISPLAY_FONT,
             CAIRO_FONT_SLANT_NORMAL,
             CAIRO_FONT_WEIGHT_BOLD);
-      cairo_set_font_size(cr, DISPLAY_FONT_SIZE2);
-      sprintf(sf,"SWR: %1.1f:1",swr);
-      cairo_move_to(cr, 10, 55);
-      cairo_show_text(cr, sf);
+        cairo_set_font_size(cr, DISPLAY_FONT_SIZE2);
+        sprintf(sf,"SWR: %1.1f:1",swr);
+        cairo_move_to(cr, 10, 55);
+        cairo_show_text(cr, sf);
+      }
 
       cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);  // revert to white color
 

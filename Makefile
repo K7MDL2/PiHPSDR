@@ -146,17 +146,16 @@ endif
 #
 ifeq ($(STEMLAB_DISCOVERY), STEMLAB_DISCOVERY)
 STEMLAB_OPTIONS=-D STEMLAB_DISCOVERY \
-  $(shell $(PKG_CONFIG) --cflags avahi-gobject) \
-  $(shell $(PKG_CONFIG) --cflags libcurl)
-STEMLAB_LIBS=$(shell $(PKG_CONFIG) --libs avahi-gobject --libs libcurl)
+  `$(PKG_CONFIG) --cflags avahi-gobject` `$(PKG_CONFIG) --cflags libcurl`
+STEMLAB_LIBS=`$(PKG_CONFIG) --libs avahi-gobject --libs libcurl`
 STEMLAB_SOURCES=stemlab_discovery.c
 STEMLAB_HEADERS=stemlab_discovery.h
 STEMLAB_OBJS=stemlab_discovery.o
 endif
 
 ifeq ($(STEMLAB_DISCOVERY), STEMLAB_DISCOVERY_NOAVAHI)
-STEMLAB_OPTIONS=-D STEMLAB_DISCOVERY -D NO_AVAHI $(shell $(PKG_CONFIG) --cflags libcurl)
-STEMLAB_LIBS=$(shell $(PKG_CONFIG) --libs libcurl)
+STEMLAB_OPTIONS=-D STEMLAB_DISCOVERY -D NO_AVAHI `$(PKG_CONFIG) --cflags libcurl`
+STEMLAB_LIBS=`$(PKG_CONFIG) --libs libcurl`
 STEMLAB_SOURCES=stemlab_discovery.c
 STEMLAB_HEADERS=stemlab_discovery.h
 STEMLAB_OBJS=stemlab_discovery.o
@@ -167,13 +166,13 @@ SERVER_OPTIONS=-D CLIENT_SERVER
 SERVER_SOURCES= \
 client_server.c server_menu.c
 SERVER_HEADERS= \
-client_server.h
+client_server.h server_menu.h
 SERVER_OBJS= \
 client_server.o server_menu.o
 endif
 
-GTKINCLUDES=$(shell $(PKG_CONFIG) --cflags gtk+-3.0)
-GTKLIBS=$(shell $(PKG_CONFIG) --libs gtk+-3.0)
+GTKINCLUDES=`$(PKG_CONFIG) --cflags gtk+-3.0`
+GTKLIBS=`$(PKG_CONFIG) --libs gtk+-3.0`
 
 #
 # set options for audio module
@@ -210,8 +209,8 @@ AUDIO_OBJS=audio.o
 endif
 
 ifeq ($(AUDIO_MODULE), PORTAUDIO)
-AUDIO_OPTIONS=-DPORTAUDIO $(shell $(PKG_CONFIG) --cflags portaudio-2.0)
-AUDIO_LIBS=$(shell $(PKG_CONFIG) --libs portaudio-2.0)
+AUDIO_OPTIONS=-DPORTAUDIO `$(PKG_CONFIG) --cflags portaudio-2.0`
+AUDIO_LIBS=`$(PKG_CONFIG) --libs portaudio-2.0`
 AUDIO_SOURCES=portaudio.c
 AUDIO_OBJS=portaudio.o
 endif
@@ -595,9 +594,10 @@ debian:
 #       start of piHPSDR) but also the radio settings and the midi.props file
 #       are stored.
 #
-#       ONLY the wdsp library is bundled with the app, all others, including
-#       the SoapySDR support modules, must be installed separatedly.
-#
+#       No libraries are included in the app bundle, so it will only run
+#       on the computer where it was created, and on other computers which
+#       have all libraries (including WDSP) and possibly the SoapySDR support
+#       modules installed.
 #############################################################################
 
 .PHONY: app
@@ -616,14 +616,4 @@ app:	$(OBJS) $(AUDIO_OBJS) $(REMOTE_OBJS) $(USBOZY_OBJS)  $(SOAPYSDR_OBJS) \
 	@cp MacOS/Info.plist pihpsdr.app/Contents
 	@cp MacOS/hpsdr.icns pihpsdr.app/Contents/Resources/hpsdr.icns
 	@cp MacOS/hpsdr.png pihpsdr.app/Contents/Resources
-#
-#	Copy the WDSP library into the executable
-#
-	@lib=`/usr/bin/otool -L pihpsdr.app/Contents/MacOS/pihpsdr | grep libwdsp | sed -e "s/ (.*//" | sed -e 's/	//'`; \
-	 libfn=`basename $$lib`; \
-	 cp "$$lib" "pihpsdr.app/Contents/Frameworks/$$libfn"; \
-	 chmod u+w "pihpsdr.app/Contents/Frameworks/$$libfn"; \
-	 /usr/bin/install_name_tool -id "@executable_path/../Frameworks/$$libfn" "pihpsdr.app/Contents/Frameworks/$$libfn"; \
-	 /usr/bin/install_name_tool -change "$$lib" "@executable_path/../Frameworks/$$libfn" pihpsdr.app/Contents/MacOS/pihpsdr
-#
 #############################################################################

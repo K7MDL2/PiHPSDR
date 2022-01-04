@@ -65,7 +65,7 @@ static const int cw_high_water = 1152;                // high water mark for CW
 #include "vfo.h"
 
 int audio = 0;
-static GMutex audio_mutex;
+GMutex audio_mutex;
 
 static snd_pcm_t *record_handle=NULL;
 static snd_pcm_format_t record_audio_format;
@@ -424,7 +424,7 @@ int cw_audio_write(RECEIVER *rx, float sample){
 	      break;
           }
         } else {
-	  g_print("%s: short write lost=%d\n", __FUNCTION__, out_buffer_size - rc);
+	  g_print("%s: short write lost=%d\n", __FUNCTION__, out_buffer_size - (int) rc);
 	}
       }
       rx->local_audio_buffer_offset=0;
@@ -538,7 +538,7 @@ int audio_write(RECEIVER *rx,float left_sample,float right_sample) {
 	      break;
           }
         } else {
-	  g_print("%s: short write lost=%d\n", __FUNCTION__, out_buffer_size - rc);
+	  g_print("%s: short write lost=%d\n", __FUNCTION__, out_buffer_size - (int) rc);
 	}
       }
       rx->local_audio_buffer_offset=0;

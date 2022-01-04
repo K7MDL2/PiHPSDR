@@ -680,11 +680,8 @@ g_print("create_visual: calling radio_change_receivers: receivers=%d r=%d\n",rec
   
 void start_radio() {
   int i;
-  int y;
 //g_print("start_radio: selected radio=%p device=%d\n",radio,radio->device);
   gdk_window_set_cursor(gtk_widget_get_window(top_window),gdk_cursor_new(GDK_WATCH));
-
-  int rc;
 
   protocol=radio->protocol;
   device=radio->device;
@@ -1145,15 +1142,8 @@ void start_radio() {
     filter_board = CHARLY25;
   }
 
-  /*
-  adc_attenuation[0]=0;
-  adc_attenuation[1]=0;
+  /* Set defaults */
 
-  if(have_rx_gain) {
-    adc_attenuation[0]=14;
-    adc_attenuation[1]=14;
-  }
-*/
   adc[0].antenna=ANTENNA_1;
   adc[0].filters=AUTOMATIC;
   adc[0].hpf=HPF_13;
@@ -1162,25 +1152,29 @@ void start_radio() {
   adc[0].random=FALSE;
   adc[0].preamp=FALSE;
   adc[0].attenuation=0;
-  if(have_rx_gain) {
-    adc[0].gain=rx_gain_calibration;
-  } else {
-    adc[0].gain=0;
+  adc[0].gain=rx_gain_calibration;
+  adc[0].min_gain=0.0;
+  adc[0].max_gain=100.0;
+  dac[0].antenna=1;
+  dac[0].gain=0;
+
+  //
+  // Some HPSDR radios have RX GAIN instead of attenuation
+  // these usually have a gain range from -12 to +48
+  //
+  if(have_rx_gain && (protocol==ORIGINAL_PROTOCOL || protocol==NEW_PROTOCOL)) {
+    adc[0].min_gain=-12.0;
+    adc[0].max_gain=+48.0;
   }
+
 #ifdef SOAPYSDR
-  adc[0].antenna=0;
+  adc[0].agc=FALSE;
   if(device==SOAPYSDR_USB_DEVICE) {
-    adc[0].gain=0;
     if(radio->info.soapy.rx_gains>0) {
       adc[0].min_gain=radio->info.soapy.rx_range[0].minimum;
       adc[0].max_gain=radio->info.soapy.rx_range[0].maximum;;
-    } else {
-      adc[0].min_gain=0.0;
-      adc[0].max_gain=100.0;
+      adc[0].gain=adc[0].min_gain;
     }
-    adc[0].agc=FALSE;
-    dac[0].antenna=1;
-    dac[0].gain=0;
   }
 #endif
 
@@ -1192,26 +1186,25 @@ void start_radio() {
   adc[1].random=FALSE;
   adc[1].preamp=FALSE;
   adc[1].attenuation=0;
-  if(have_rx_gain) {
-    adc[1].gain=rx_gain_calibration;
-  } else {
-    adc[1].gain=0;
+  adc[1].gain=rx_gain_calibration;
+  adc[1].min_gain=0.0;
+  adc[1].max_gain=100.0;
+  dac[1].antenna=1;
+  dac[1].gain=0;
+
+  if(have_rx_gain && (protocol==ORIGINAL_PROTOCOL || protocol==NEW_PROTOCOL)) {
+    adc[1].min_gain=-12.0;
+    adc[1].max_gain=+48.0;
   }
+
 #ifdef SOAPYSDR
-  adc[1].antenna=0;
+  adc[1].agc=FALSE;
   if(device==SOAPYSDR_USB_DEVICE) {
-    adc[1].gain=0;
     if(radio->info.soapy.rx_gains>0) {
       adc[1].min_gain=radio->info.soapy.rx_range[0].minimum;
       adc[1].max_gain=radio->info.soapy.rx_range[0].maximum;;
-    } else {
-      adc[1].min_gain=0.0;
-      adc[1].max_gain=100.0;
+      adc[1].gain=adc[1].min_gain;
     }
-    adc[1].max_gain=0;
-    adc[1].agc=FALSE;
-    dac[1].antenna=1;
-    dac[1].gain=0;
   }
 
   radio_sample_rate=radio->info.soapy.sample_rate;
@@ -1553,6 +1546,10 @@ static void rxtx(int state) {
         gtk_fixed_put(GTK_FIXED(fixed),receiver[i]->panel,receiver[i]->x,receiver[i]->y);
         SetChannelState(receiver[i]->id,1,0);
         set_displaying(receiver[i],1);
+        receiver[i]->rxcount=0;
+        receiver[i]->maxcount=-1;
+	// if not duplex, clear RX iq buffer
+        receiver[i]->samples=0;
       }
     }
   }
@@ -1712,7 +1709,7 @@ void setTune(int state) {
       pre_tune_cw_internal=cw_keyer_internal;
 
       //
-      // in USB/DIGU/DSB, tune 1000 Hz above carrier
+      // in USB/DIGU      tune 1000 Hz above carrier
       // in LSB/DIGL,     tune 1000 Hz below carrier
       // all other (CW, AM, FM): tune on carrier freq.
       //
@@ -1722,7 +1719,6 @@ void setTune(int state) {
           SetTXAPostGenToneFreq(transmitter->id,-(double)1000.0);
           break;
         case modeUSB:
-        case modeDSB:
         case modeDIGU:
           SetTXAPostGenToneFreq(transmitter->id,(double)1000.0);
           break;
@@ -1910,61 +1906,85 @@ void set_attenuation(int value) {
     }
 }
 
-//
-// For HPSDR, only receiver[0]->rx_antenna has an effect
-// The antenna is set according to what is stored in the "band" info
-// We have to call this routine in the HPSDR case each time a band is switched.
-//
-void set_alex_rx_antenna() {
-    BAND *band;
-    switch (protocol) {
-      case ORIGINAL_PROTOCOL:
-        band=band_get_band(vfo[VFO_A].band);
-        receiver[0]->alex_antenna=band->alexRxAntenna;
-        break;
-      case NEW_PROTOCOL:
-        band=band_get_band(vfo[VFO_A].band);
-        receiver[0]->alex_antenna=band->alexRxAntenna;
-        schedule_high_priority();
-        break;
-      }
-      // This function is NOT called for SOAPY devices
-}
-
-//
-// For HPSDR, determine which band control the TX and
-// set TX antenna accordingly
-// We have to call this routine
-// in the HPSDR case each time the TX band is switched,
-// which is for each band switch, each time "split" is
-// changed, and in case of "split", each time the active
-// RX changes!
-//
-void set_alex_tx_antenna() {
-    BAND *band;
-    if (!can_transmit) return;
-    switch (protocol) {
-      case ORIGINAL_PROTOCOL:
-        band=band_get_band(vfo[get_tx_vfo()].band);
-        transmitter->alex_antenna=band->alexTxAntenna;
-	break;
-      case NEW_PROTOCOL:
-        band=band_get_band(vfo[get_tx_vfo()].band);
-        transmitter->alex_antenna=band->alexTxAntenna;
-        schedule_high_priority();
-	break;
+void set_alex_antennas() {
+  //
+  // Obtain band of VFO-A and transmitter, set ALEX RX/TX antennas
+  // and the step attenuator
+  // This function is a no-op when running SOAPY.
+  // This function also takes care of updating the PA dis/enable
+  // status for P2.
+  //
+  BAND *band;
+  if (protocol == ORIGINAL_PROTOCOL || protocol == NEW_PROTOCOL) {
+    band=band_get_band(vfo[VFO_A].band);
+    receiver[0]->alex_antenna=band->alexRxAntenna;
+    receiver[0]->alex_attenuation=band->alexAttenuation;
+    update_att_preamp();
+    if (can_transmit) {
+      band=band_get_band(vfo[get_tx_vfo()].band);
+      transmitter->alex_antenna=band->alexTxAntenna;
     }
-    // This function is NOT called for SOAPY devices
+  }
+  if (protocol == NEW_PROTOCOL) {
+    schedule_high_priority();         // possibly update RX/TX antennas
+    schedule_general();               // possibly update PA disable
+  }
 }
 
-//
-// For HPSDR, only receiver[0]->alex_attenuation has an effect
-//
+void tx_vfo_changed() {
+  //
+  // When changing the active receiver or changing the split status,
+  // the VFO that controls the transmitter my flip between VFOA/VFOB.
+  // In these cases, we have to update the TX mode,
+  // and re-calculate the drive level from the band-specific PA calibration
+  // values. For SOAPY, the only thing to do is the update the TX mode.
+  //
+  // Note each time tx_vfo_changed() is called, calling set_alex_antennas()
+  // is also due.
+  //
+  if (can_transmit) {
+    tx_set_mode(transmitter,get_tx_mode());
+    calcDriveLevel();
+  }
+  if (protocol == NEW_PROTOCOL) {
+    schedule_high_priority();         // possibly update RX/TX antennas
+    schedule_general();               // possibly update PA disable
+  }
+}
+
 void set_alex_attenuation(int v) {
-    receiver[0]->alex_attenuation=v;
+    //
+    // Change the value of the step attenuator. Store it
+    // in the "band" data structure of the current band,
+    // and in the receiver[0] data structure
+    //
+    BAND *band;
+    if (protocol == ORIGINAL_PROTOCOL || protocol == NEW_PROTOCOL) {
+      //
+      // Store new value of the step attenuator in band data structure
+      // (v can be 0,1,2,3)
+      //
+      band=band_get_band(vfo[VFO_A].band);
+      band->alexAttenuation=v;
+      receiver[0]->alex_attenuation=v;
+    }
     if(protocol==NEW_PROTOCOL) {
       schedule_high_priority();
     }
+}
+
+void radio_set_split(int val) {
+  //
+  // "split" *must only* be set through this interface,
+  // since it may change the TX band and thus requires
+  // tx_vfo_changed() and set_alex_antennas().
+  //
+  if (can_transmit) {
+    split=val;
+    tx_vfo_changed();
+    set_alex_antennas();
+    g_idle_add(ext_vfo_update, NULL);
+  }
 }
 
 void radioRestoreState() {
@@ -2747,12 +2767,15 @@ int remote_start(void *data) {
   display_sliders=1;
   display_toolbar=1;
 #endif
+  RECEIVERS=2;
   radioRestoreState();
   create_visual();
-  if(transmitter->local_microphone) {
-    if(audio_open_input()!=0) {
-      g_print("audio_open_input failed\n");
-      transmitter->local_microphone=0;
+  if (can_transmit) {
+    if(transmitter->local_microphone) {
+      if(audio_open_input()!=0) {
+        g_print("audio_open_input failed\n");
+        transmitter->local_microphone=0;
+      }
     }
   }
   for(int i=0;i<receivers;i++) {

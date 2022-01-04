@@ -155,12 +155,7 @@ static gboolean freqent_select_cb (GtkWidget *widget, gpointer data) {
         send_vfo_frequency(client_socket,active_receiver->id,f);
       } else {
 #endif
-        //This is inside a callback so we do not need g_idle_add
-        //fp=g_new(SET_FREQUENCY,1);
-        //fp->vfo=v;
-        //fp->frequency = f;
-        //g_idle_add(ext_set_frequency, fp);
-        set_frequency(v, f);
+        vfo_set_frequency(v, f);
 #ifdef CLIENT_SERVER
       }
 #endif
@@ -187,7 +182,7 @@ static void rit_cb(GtkComboBox *widget,gpointer data) {
 }
 
 static void vfo_cb(GtkComboBox *widget,gpointer data) {
-  step=steps[gtk_combo_box_get_active(widget)];
+  vfo_set_step_from_index(gtk_combo_box_get_active(widget));
   g_idle_add(ext_vfo_update,NULL);
 }
 
@@ -289,9 +284,10 @@ void vfo_menu(GtkWidget *parent,int vfo) {
   gtk_grid_attach(GTK_GRID(grid),vfo_label,3,3,1,1);
 
   GtkWidget *vfo_b=gtk_combo_box_text_new();
+  int index=vfo_get_stepindex();
   for (i=0; i<STEPS; i++) {
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(vfo_b),NULL,step_labels[i]);
-    if(steps[i]==step) {
+    if(i == index) {
       gtk_combo_box_set_active (GTK_COMBO_BOX(vfo_b), i);
     }
   }
@@ -299,10 +295,16 @@ void vfo_menu(GtkWidget *parent,int vfo) {
   gtk_grid_attach(GTK_GRID(grid),vfo_b,4,3,1,1);
 
 
-  GtkWidget *enable_squelch=gtk_check_button_new_with_label("Enable Squelch");
-  gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (enable_squelch), active_receiver->squelch_enable);
-  gtk_grid_attach(GTK_GRID(grid),enable_squelch,3,5,1,1);
-  g_signal_connect(enable_squelch,"toggled",G_CALLBACK(squelch_enable_cb),NULL);
+  if (!display_sliders) {
+    //
+    // If the sliders are "on display", then we also have a squelch-enable checkbox
+    // in the display area.
+    // 
+    GtkWidget *enable_squelch=gtk_check_button_new_with_label("Enable Squelch");
+    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (enable_squelch), active_receiver->squelch_enable);
+    gtk_grid_attach(GTK_GRID(grid),enable_squelch,3,5,1,1);
+    g_signal_connect(enable_squelch,"toggled",G_CALLBACK(squelch_enable_cb),NULL);
+  }
 
 #ifdef PURESIGNAL
   if(can_transmit && (protocol==ORIGINAL_PROTOCOL || protocol==NEW_PROTOCOL)) {

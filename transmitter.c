@@ -659,6 +659,7 @@ static gboolean update_display(gpointer data) {
     //
     tx->fwd=compute_power(tx->fwd);
     tx->rev=compute_power(tx->rev);
+    tx->exciter=compute_power(tx->exciter);
 
     //
     // Calculate SWR and store as tx->swr.
@@ -699,7 +700,7 @@ static gboolean update_display(gpointer data) {
     }
 
     if(!duplex) {
-      meter_update(active_receiver,POWER,tx->fwd,tx->rev,tx->alc,tx->swr);
+      meter_update(active_receiver,POWER,tx->fwd,tx->rev,tx->exciter,tx->alc,tx->swr);
     }
 
     return TRUE; // keep going
@@ -892,6 +893,8 @@ fprintf(stderr,"create_transmitter: id=%d buffer_size=%d mic_sample_rate=%d mic_
   tx->swr_protection = FALSE;
   tx->swr_alarm=3.0;       // default value for SWR protection
 
+  tx->alc=0.0;
+
   transmitter_restore_state(tx);
 
 
@@ -1012,7 +1015,6 @@ fprintf(stderr,"transmitter: allocate buffers: mic_input_buffer=%d iq_output_buf
 
 void tx_set_mode(TRANSMITTER* tx,int mode) {
   if(tx!=NULL) {
-    int filter_low, filter_high;
     tx->mode=mode;
     SetTXAMode(tx->id, tx->mode);
     tx_set_filter(tx);
@@ -1029,7 +1031,7 @@ void tx_set_filter(TRANSMITTER *tx) {
   if (tx->use_rx_filter) {
     //
     // Use only 'compatible' parts of RX filter settings
-    // to change TX values (importrant for split operation)
+    // to change TX values (important for split operation)
     //
     int id=active_receiver->id;
     int rxmode=vfo[id].mode;
@@ -1059,8 +1061,8 @@ void tx_set_filter(TRANSMITTER *tx) {
   switch(txmode) {
     case modeCWL:
     case modeCWU:
-      // default filter setting (low=150, high=2850) and "use rx filter" unreasonable here
-      // note currently WDSP is by-passed in CW anyway.
+      // Our CW signal is always at zero in IQ space, but note
+      // WDSP is by-passed anyway.
       tx->filter_low  =-150;
       tx->filter_high = 150;
       break;
@@ -1070,7 +1072,7 @@ void tx_set_filter(TRANSMITTER *tx) {
     case modeSPEC:
       // disregard the "low" value and use (-high, high)
       tx->filter_low =-high;
-      tx->filter_high=high;
+      tx->filter_high= high;
       break;
     case modeLSB:
     case modeDIGL:
@@ -1138,7 +1140,7 @@ static void full_tx_buffer(TRANSMITTER *tx) {
       break;
 #ifdef SOAPYSDR
     case SOAPYSDR_PROTOCOL:
-      gain=32767.0;  // 16 bit
+      // gain is not used, since samples are floating point
       break;
 #endif
   }
@@ -1180,7 +1182,7 @@ static void full_tx_buffer(TRANSMITTER *tx) {
     // by about 20 dB and at 1000 Hz by about 10 dB.
     // Natural speech has much energy at frequencies below 1000 Hz
     // which will therefore aquire only little energy, such that
-    // FM sounds rather silent.
+    // FM sounds rather "thin".
     //
     // At the expense of having some distortion for the highest
     // frequencies, we amplify the mic samples here by 15 dB
@@ -1243,39 +1245,6 @@ static void full_tx_buffer(TRANSMITTER *tx) {
         gain=gain*(double)tx->drive_level*fac*0.00392;
       } else {
         gain=gain*(double)tx->drive_level*0.00392;
-      }
-    }
-    if (protocol == ORIGINAL_PROTOCOL && radio->device == DEVICE_HERMES_LITE2 && !transmitter->puresignal) {
-      //
-      // The HermesLite2 is built around the AD9866 modem chip. The TX level can
-      // be adjusted from 0.0 to -7.5 dB in 0.5 db steps, and these settings are
-      // encoded in the top 4 bits of the HPSDR "drive level".
-      //
-      // In old_protocol.c, the TX attenuator is set according to the drive level,
-      // here we only apply a (mostly small) additional damping of the IQ samples
-      // to achieve a smooth drive level adjustment.
-      // However, if the drive level requires an attenuation *much* larger than
-      // 7.5 dB we have to damp significantly at this place, which may affect IMD.
-      //
-      // NOTE: When doing adaptive pre-distortion (PURESIGNAL), IQ scaling cannot
-      //       be used.
-      //
-      int power;
-      double f,g;
-      if(tune && !tx->tune_use_drive) {
-        f=sqrt((double)tx->tune_percent * 0.01);
-        power=(int)((double)tx->drive_level*f);
-      } else {
-        power=tx->drive_level;
-      }
-      g=-15.0;
-      if (power > 0) {
-        f = 40.0 * log10((double) power / 255.0);   // 2* attenuation in dB
-        g= ceil(f);                                 // 2* attenuation rounded to half-dB steps
-        if (g < -15.0) g=-15.0;                     // nominal TX attenuation
-        gain=gain*pow(10.0,0.05*(f-g));
-      } else {
-        gain=0.0;
       }
     }
 
@@ -1341,11 +1310,9 @@ static void full_tx_buffer(TRANSMITTER *tx) {
             // the only difference to the P2 treatment is that we do not
             // generate audio samples to be sent to the radio
             //
-	    isample=0;
             for(j=0;j<tx->output_samples;j++) {
 	      ramp=cw_shape_buffer192[j];	    		// between 0.0 and 1.0
-	      qsample=floor(gain*ramp+0.5);         	    	// always non-negative, isample is just the pulse envelope
-              soapy_protocol_iq_samples((float)isample,(float)qsample);
+              soapy_protocol_iq_samples(0.0F,(float)ramp);      // SOAPY: just convert double to float
 	    }
 	    break;
 #endif
@@ -1356,13 +1323,8 @@ static void full_tx_buffer(TRANSMITTER *tx) {
 	//
 	for(j=0;j<tx->output_samples;j++) {
             double is,qs;
-            if(iqswap) {
-	      qs=tx->iq_output_buffer[j*2];
-	      is=tx->iq_output_buffer[(j*2)+1];
-            } else {
-	      is=tx->iq_output_buffer[j*2];
-	      qs=tx->iq_output_buffer[(j*2)+1];
-            }
+	    is=tx->iq_output_buffer[j*2];
+	    qs=tx->iq_output_buffer[(j*2)+1];
 	    isample=is>=0.0?(long)floor(is*gain+0.5):(long)ceil(is*gain-0.5);
 	    qsample=qs>=0.0?(long)floor(qs*gain+0.5):(long)ceil(qs*gain-0.5);
 	    switch(protocol) {
@@ -1374,7 +1336,8 @@ static void full_tx_buffer(TRANSMITTER *tx) {
 		    break;
 #ifdef SOAPYSDR
                 case SOAPYSDR_PROTOCOL:
-                    soapy_protocol_iq_samples((float)isample,(float)qsample);
+                    // SOAPY: just convert the double IQ sampels (is,qs) to float.
+                    soapy_protocol_iq_samples((float)is,(float)qs);
                     break;
 #endif
 	    }

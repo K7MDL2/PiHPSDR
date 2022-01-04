@@ -97,7 +97,6 @@ void memRestoreState() {
 
 void recall_memory_slot(int index) {
     long long new_freq;
-    int id=active_receiver->id;
 
     new_freq = mem[index].frequency;
     fprintf(stderr,"recall_select_cb: Index=%d\n",index);
@@ -118,14 +117,13 @@ void recall_memory_slot(int index) {
     // Step c) will not only change the filter but also store the new setting
     // with that mode.
     //
-    set_frequency(active_receiver->id, new_freq);
+    vfo_set_frequency(active_receiver->id, new_freq);
     vfo_mode_changed(mem[index].mode);
     vfo_filter_changed(mem[index].filter);
     g_idle_add(ext_vfo_update,NULL);
 }
 
 void store_memory_slot(int index) {
-   char workstr[40];
    int id=active_receiver->id;
 
    //

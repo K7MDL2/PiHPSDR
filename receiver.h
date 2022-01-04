@@ -149,6 +149,8 @@ typedef struct _receiver {
 
   gint64 waterfall_frequency;
   gint waterfall_sample_rate;
+  gint waterfall_pan;
+  gint waterfall_zoom;
 
   gint mute_radio;
 
@@ -164,6 +166,8 @@ typedef struct _receiver {
 
   gint x;
   gint y;
+
+  int rxcount; int maxcount;
 } RECEIVER;
 
 extern RECEIVER *create_pure_signal_receiver(int id, int buffer_size,int sample_rate,int pixels);
@@ -178,7 +182,7 @@ extern void receiver_change_zoom(RECEIVER *rx,double zoom);
 extern void receiver_change_pan(RECEIVER *rx,double pan);
 
 extern void set_mode(RECEIVER* rx,int m);
-extern void set_filter(RECEIVER *rx,int low,int high);
+extern void set_filter(RECEIVER *rx);
 extern void set_agc(RECEIVER *rx, int agc);
 extern void set_offset(RECEIVER *rx, long long offset);
 extern void set_deviation(RECEIVER *rx);

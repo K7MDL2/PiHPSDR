@@ -88,6 +88,7 @@ static GtkWidget *drive_label;
 static GtkWidget *drive_scale;
 static GtkWidget *squelch_label;
 static GtkWidget *squelch_scale;
+static gulong     squelch_signal_id;
 static GtkWidget *squelch_enable;
 static GtkWidget *comp_label;
 static GtkWidget *comp_scale;
@@ -119,12 +120,25 @@ void sliders_update() {
 
 int sliders_active_receiver_changed(void *data) {
   if(display_sliders) {
+    //
+    // Change sliders and check-boxes to reflect the state of the
+    // new active receiver
+    //
     gtk_range_set_value(GTK_RANGE(af_gain_scale),active_receiver->volume*100.0);
     gtk_range_set_value (GTK_RANGE(agc_scale),active_receiver->agc_gain);
+    //
+    // need block/unblock so setting the value of the receivers does not
+    // enable/disable squelch
+    //
+    g_signal_handler_block(G_OBJECT(squelch_scale),squelch_signal_id);
+    gtk_range_set_value (GTK_RANGE(squelch_scale),active_receiver->squelch);
+    g_signal_handler_unblock(G_OBJECT(squelch_scale),squelch_signal_id);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(squelch_enable),active_receiver->squelch_enable);
     if (filter_board == CHARLY25) {
       update_att_preamp();
     } else {
       if(attenuation_scale!=NULL) gtk_range_set_value (GTK_RANGE(attenuation_scale),(double)adc[active_receiver->adc].attenuation);
+      if (rf_gain_scale != NULL)  gtk_range_set_value (GTK_RANGE(rf_gain_scale),adc[active_receiver->adc].gain);
     }
     sliders_update();
   }
@@ -152,15 +166,17 @@ static void attenuation_value_changed_cb(GtkWidget *widget, gpointer data) {
 
 void set_attenuation_value(double value) {
   g_print("%s\n",__FUNCTION__);
+  if (have_rx_gain) {
+    // The only way to arrive here is to assign "ATTENUATION" to a
+    // MIDI/GPIO controller. However, this program either uses attenuation
+    // or gain, so ignore this.
+    g_print("%s: Ignoring attempt to set ATTENUATION value\n",__FUNCTION__);
+    return;
+  }
   adc[active_receiver->adc].attenuation=(int)value;
   set_attenuation(adc[active_receiver->adc].attenuation);
   if(display_sliders) {
-    if (have_rx_gain) {
-	/* NOTREACHED */
-	gtk_range_set_value (GTK_RANGE(attenuation_scale),(double)adc[active_receiver->adc].gain);
-    } else {
-        gtk_range_set_value (GTK_RANGE(attenuation_scale),(double)adc[active_receiver->adc].attenuation);
-    }
+    gtk_range_set_value (GTK_RANGE(attenuation_scale),(double)adc[active_receiver->adc].attenuation);
   } else {
     if(scale_status!=ATTENUATION) {
       if(scale_status!=NO_ACTION) {
@@ -171,19 +187,11 @@ void set_attenuation_value(double value) {
     }
     if(scale_status==NO_ACTION) {
       char title[64];
-      if (have_rx_gain) {
-	  sprintf(title,"RX GAIN - ADC-%d (dB)",active_receiver->adc);
-      } else {
-          sprintf(title,"Attenuation - ADC-%d (dB)",active_receiver->adc);
-      }
+      sprintf(title,"Attenuation - ADC-%d (dB)",active_receiver->adc);
       scale_status=ATTENUATION;
       scale_dialog=gtk_dialog_new_with_buttons(title,GTK_WINDOW(top_window),GTK_DIALOG_DESTROY_WITH_PARENT,NULL,NULL);
       GtkWidget *content=gtk_dialog_get_content_area(GTK_DIALOG(scale_dialog));
-      if (have_rx_gain) {
-        attenuation_scale=gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL,-12.0, 48.0, 1.00);
-      } else {
-        attenuation_scale=gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL,0.0, 31.0, 1.00);
-      }
+      attenuation_scale=gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL,0.0, 31.0, 1.00);
       gtk_widget_set_size_request (attenuation_scale, 400, 30);
       gtk_range_set_value (GTK_RANGE(attenuation_scale),(double)adc[active_receiver->adc].attenuation);
       gtk_widget_show(attenuation_scale);
@@ -279,9 +287,7 @@ static void agcgain_value_changed_cb(GtkWidget *widget, gpointer data) {
     send_agc_gain(client_socket,active_receiver->id,(int)active_receiver->agc_gain,(int)active_receiver->agc_hang,(int)active_receiver->agc_thresh);
   } else {
 #endif
-    SetRXAAGCTop(active_receiver->id, active_receiver->agc_gain);
-    GetRXAAGCHangLevel(active_receiver->id, &active_receiver->agc_hang);
-    GetRXAAGCThresh(active_receiver->id, &active_receiver->agc_thresh, 4096.0, (double)active_receiver->sample_rate);
+  set_agc(active_receiver, active_receiver->agc);
 #ifdef CLIENT_SERVER
   }
 #endif
@@ -290,9 +296,7 @@ static void agcgain_value_changed_cb(GtkWidget *widget, gpointer data) {
 void set_agc_gain(int rx,double value) {
   g_print("%s\n",__FUNCTION__);
   receiver[rx]->agc_gain=value;
-  SetRXAAGCTop(receiver[rx]->id, receiver[rx]->agc_gain);
-  GetRXAAGCHangLevel(receiver[rx]->id, &receiver[rx]->agc_hang);
-  GetRXAAGCThresh(receiver[rx]->id, &receiver[rx]->agc_thresh, 4096.0, (double)receiver[rx]->sample_rate);
+  set_agc(receiver[rx], receiver[rx]->agc);
   if(display_sliders) {
     gtk_range_set_value (GTK_RANGE(agc_scale),receiver[rx]->agc_gain);
   } else {
@@ -387,6 +391,12 @@ void set_af_gain(int rx,double value) {
 
 static void rf_gain_value_changed_cb(GtkWidget *widget, gpointer data) {
     adc[active_receiver->adc].gain=gtk_range_get_value(GTK_RANGE(rf_gain_scale));
+#ifdef CLIENT_SERVER
+    if (radio_is_remote) {
+      send_rfgain(client_socket, active_receiver->id, adc[active_receiver->adc].gain);
+    }
+    return;
+#endif
     switch(protocol) {
 #ifdef SOAPYSDR
       case SOAPYSDR_PROTOCOL:
@@ -404,16 +414,21 @@ void update_rf_gain() {
 }
 
 void set_rf_gain(int rx,double value) {
-  g_print("%s\n",__FUNCTION__);
-  adc[receiver[rx]->adc].gain=value;
+  int rxadc=receiver[rx]->adc;
+  g_print("%s rx=%d adc=%d val=%f\n",__FUNCTION__, rx, rxadc, value);
+  if (!have_rx_gain) {
+    // ignore attempt to set gain when we do not have one
+    g_print("%s: Ignoring attempt to set RF gain\n",__FUNCTION__);
+    return;
+  }
+  adc[rxadc].gain=value;
 #ifdef SOAPYSDR
   if(protocol==SOAPYSDR_PROTOCOL) {
     soapy_protocol_set_gain(receiver[rx]);
   }
 #endif
   if(display_sliders) {
-    //gtk_range_set_value (GTK_RANGE(attenuation_scale),receiver[rx]->rf_gain);
-    gtk_range_set_value (GTK_RANGE(rf_gain_scale),adc[receiver[rx]->id].gain);
+    gtk_range_set_value (GTK_RANGE(rf_gain_scale),adc[rxadc].gain);
   } else {
     if(scale_status!=RF_GAIN || scale_rx!=rx) {
       if(scale_status!=NO_ACTION) {
@@ -426,13 +441,12 @@ void set_rf_gain(int rx,double value) {
       scale_status=RF_GAIN;
       scale_rx=rx;
       char title[64];
-      sprintf(title,"RF Gain RX %d",rx);
+      sprintf(title,"RF Gain ADC %d",rxadc);
       scale_dialog=gtk_dialog_new_with_buttons(title,GTK_WINDOW(top_window),GTK_DIALOG_DESTROY_WITH_PARENT,NULL,NULL);
       GtkWidget *content=gtk_dialog_get_content_area(GTK_DIALOG(scale_dialog));
-      rf_gain_scale=gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL,0.0, 100.0, 1.00);
+      rf_gain_scale=gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL,adc[rxadc].min_gain, adc[rxadc].max_gain, 1.0);
       gtk_widget_set_size_request (rf_gain_scale, 400, 30);
-      //gtk_range_set_value (GTK_RANGE(rf_gain_scale),receiver[rx]->rf_gain);
-      gtk_range_set_value (GTK_RANGE(rf_gain_scale),adc[receiver[rx]->id].gain);
+      gtk_range_set_value (GTK_RANGE(rf_gain_scale),adc[rxadc].gain);
       gtk_widget_show(rf_gain_scale);
       gtk_container_add(GTK_CONTAINER(content),rf_gain_scale);
       scale_timer=g_timeout_add(2000,scale_timeout_cb,NULL);
@@ -440,8 +454,7 @@ void set_rf_gain(int rx,double value) {
       gtk_dialog_run(GTK_DIALOG(scale_dialog));
     } else {
       g_source_remove(scale_timer);
-      //gtk_range_set_value (GTK_RANGE(rf_gain_scale),receiver[rx]->rf_gain);
-      gtk_range_set_value (GTK_RANGE(rf_gain_scale),adc[receiver[rx]->id].gain);
+      gtk_range_set_value (GTK_RANGE(rf_gain_scale),adc[rxadc].gain);
       scale_timer=g_timeout_add(2000,scale_timeout_cb,NULL);
     }
   }
@@ -639,6 +652,8 @@ int update_drive(void *data) {
 
 static void squelch_value_changed_cb(GtkWidget *widget, gpointer data) {
   active_receiver->squelch=gtk_range_get_value(GTK_RANGE(widget));
+  active_receiver->squelch_enable = (active_receiver->squelch > 0.5);
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(squelch_enable),active_receiver->squelch_enable);
 #ifdef CLIENT_SERVER
   if(radio_is_remote) {
     send_squelch(client_socket,active_receiver->id,active_receiver->squelch_enable,active_receiver->squelch);
@@ -676,12 +691,18 @@ static void compressor_enable_cb(GtkWidget *widget, gpointer data) {
   g_idle_add(ext_vfo_update, NULL);
 }
 
-void set_squelch() {
+void set_squelch(RECEIVER *rx) {
   g_print("%s\n",__FUNCTION__);
-  setSquelch(active_receiver);
+  //
+  // automatically enable/disable squelch
+  // if squelch value changed
+  //
+  rx->squelch_enable = (rx->squelch > 0.5);
+  setSquelch(rx);
 #ifndef COMPRESSION_SLIDER_INSTEAD_OF_SQUELCH
-  if(display_sliders) {
-    gtk_range_set_value (GTK_RANGE(squelch_scale),active_receiver->squelch);
+  if(display_sliders && rx->id == active_receiver->id) {
+    gtk_range_set_value (GTK_RANGE(squelch_scale),rx->squelch);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(squelch_enable),rx->squelch_enable);
   } else {
 #endif
     if(scale_status!=SQUELCH) {
@@ -694,12 +715,12 @@ void set_squelch() {
     if(scale_status==NO_ACTION) {
       scale_status=SQUELCH;
       char title[64];
-      sprintf(title,"Squelch RX %d (Hz)",active_receiver->id);
+      sprintf(title,"Squelch RX %d (Hz)",rx->id);
       scale_dialog=gtk_dialog_new_with_buttons(title,GTK_WINDOW(top_window),GTK_DIALOG_DESTROY_WITH_PARENT,NULL,NULL);
       GtkWidget *content=gtk_dialog_get_content_area(GTK_DIALOG(scale_dialog));
       squelch_scale=gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL,0.0, 100.0, 1.00);
       gtk_widget_override_font(squelch_scale, pango_font_description_from_string(SLIDERS_FONT));
-      gtk_range_set_value (GTK_RANGE(squelch_scale),active_receiver->squelch);
+      gtk_range_set_value (GTK_RANGE(squelch_scale),rx->squelch);
       gtk_widget_set_size_request (squelch_scale, 400, 30);
       gtk_widget_show(squelch_scale);
       gtk_container_add(GTK_CONTAINER(content),squelch_scale);
@@ -707,7 +728,7 @@ void set_squelch() {
       gtk_dialog_run(GTK_DIALOG(scale_dialog));
     } else {
       g_source_remove(scale_timer);
-      gtk_range_set_value (GTK_RANGE(squelch_scale),active_receiver->squelch);
+      gtk_range_set_value (GTK_RANGE(squelch_scale),rx->squelch);
       scale_timer=g_timeout_add(2000,scale_timeout_cb,NULL);
     }
 #ifndef COMPRESSION_SLIDER_INSTEAD_OF_SQUELCH
@@ -853,17 +874,8 @@ fprintf(stderr,"sliders_init: width=%d height=%d\n", width,height);
     gtk_widget_override_font(rf_gain_label, pango_font_description_from_string(SLIDERS_FONT));
     gtk_widget_show(rf_gain_label);
     gtk_grid_attach(GTK_GRID(sliders),rf_gain_label,6,0,1,1);
-#ifdef SOAPYSDR
-    if(protocol==SOAPYSDR_PROTOCOL) {
-      rf_gain_scale=gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL,adc[0].min_gain, adc[0].max_gain, 1.0);
-      gtk_range_set_value (GTK_RANGE(rf_gain_scale),adc[0].gain);
-    } else {
-#endif
-      rf_gain_scale=gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL,-12.0, 48.0, 1.0);
-      gtk_range_set_value (GTK_RANGE(rf_gain_scale),adc[active_receiver->adc].gain);
-#ifdef SOAPYSDR
-    }
-#endif
+    rf_gain_scale=gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL,adc[0].min_gain, adc[0].max_gain, 1.0);
+    gtk_range_set_value (GTK_RANGE(rf_gain_scale),adc[0].gain);
     gtk_widget_override_font(rf_gain_scale, pango_font_description_from_string(SLIDERS_FONT));
     gtk_range_set_increments (GTK_RANGE(rf_gain_scale),1.0,1.0);
     gtk_widget_show(rf_gain_scale);
@@ -943,7 +955,7 @@ fprintf(stderr,"sliders_init: width=%d height=%d\n", width,height);
   gtk_range_set_value (GTK_RANGE(squelch_scale),active_receiver->squelch);
   gtk_widget_show(squelch_scale);
   gtk_grid_attach(GTK_GRID(sliders),squelch_scale,7,1,2,1);
-  g_signal_connect(G_OBJECT(squelch_scale),"value_changed",G_CALLBACK(squelch_value_changed_cb),NULL);
+  squelch_signal_id=g_signal_connect(G_OBJECT(squelch_scale),"value_changed",G_CALLBACK(squelch_value_changed_cb),NULL);
 
   squelch_enable=gtk_check_button_new();
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(squelch_enable),active_receiver->squelch_enable);

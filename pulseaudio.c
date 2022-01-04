@@ -44,7 +44,7 @@ static float *local_microphone_buffer=NULL;
 static GThread *mic_read_thread_id=0;
 static gboolean running;
 
-static GMutex audio_mutex;
+GMutex audio_mutex;
 
 static void source_list_cb(pa_context *context,const pa_source_info *s,int eol,void *data) {
   int i;
@@ -134,13 +134,6 @@ int audio_open_output(RECEIVER *rx) {
   pa_sample_spec sample_spec;
   int err;
 
-  pa_buffer_attr attr;
-  attr.maxlength = (uint32_t) -1;
-  attr.tlength = (uint32_t) -1;
-  attr.prebuf = (uint32_t) 3072;  // about 64 msec "pre-filling"
-  attr.minreq = (uint32_t) -1;
-  attr.fragsize = (uint32_t) -1;
-
   if(rx->audio_name==NULL) {
     result=-1;
   } else {
@@ -160,7 +153,7 @@ int audio_open_output(RECEIVER *rx) {
                     stream_id,          // Description of our stream.
                     &sample_spec,       // Our sample format.
                     NULL,               // Use default channel map
-                    &attr,              // use our "prebuf" value
+                    NULL,               // Use default attributes
                     &err                // error code if returns NULL
                     );
 
