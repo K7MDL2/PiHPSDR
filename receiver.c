@@ -1011,6 +1011,10 @@ g_print("%s: id=%d buffer_size=%d fft_size=%d pixels=%d fps=%d\n",__FUNCTION__,i
         case ORIGINAL_PROTOCOL:
           switch(device) {
             case DEVICE_METIS:
+#ifdef USBOZY
+	    case DEVICE_OZY:
+#endif
+
             case DEVICE_HERMES:
             case DEVICE_HERMES_LITE:			
             case DEVICE_HERMES_LITE2:			
@@ -1396,7 +1400,16 @@ static void process_rx_buffer(RECEIVER *rx) {
     }
 
     if(rx->local_audio) {
-      if((rx!=active_receiver && rx->mute_when_not_active)) {
+      //
+      // I received many comments on the "expected" function of the
+      // "Mute audio to radio" checkbox in the RX menu.
+      //
+      // 1    vote  was :  mute_radio should *only* mute the samples sent to the radio
+      // Many votes were: mute_radio should *also* mute the samples sent to local audio
+      //
+      // So this is now reverted to the original situation, respecting the "majority"
+      //
+      if((rx!=active_receiver && rx->mute_when_not_active) || rx->mute_radio) {
         left_sample=0.0;
         right_sample=0.0;
       } else {

@@ -67,6 +67,7 @@
 #include "toolbar.h"
 #include "rigctl.h"
 #include "ext.h"
+#include "radio_menu.h"
 #ifdef LOCALCW
 #include "iambic.h"
 #endif
@@ -153,7 +154,7 @@ int PS_RX_FEEDBACK;
 int buffer_size=1024; // 64, 128, 256, 512, 1024, 2048
 int fft_size=2048; // 1024, 2048, 4096, 8192, 16384
 
-int atlas_penelope=0;  // 0: no penelope, 1: penelope, 2: unknown
+int atlas_penelope=0;  // 0: no TX, 1: Penelope TX, 2: PennyLane TX
 int atlas_clock_source_10mhz=0;
 int atlas_clock_source_128mhz=0;
 int atlas_config=0;
@@ -686,29 +687,22 @@ void start_radio() {
   protocol=radio->protocol;
   device=radio->device;
 
-  // init atlas_penelope flag
-  atlas_penelope = 0;  // default: no penelope
-  if (protocol == ORIGINAL_PROTOCOL && device == DEVICE_METIS) {
+  if ((protocol == ORIGINAL_PROTOCOL && device == DEVICE_METIS) ||
+#ifdef USBOZY
+      (protocol == ORIGINAL_PROTOCOL && device == DEVICE_OZY) ||
+#endif
+      (protocol == NEW_PROTOCOL      && device == NEW_DEVICE_ATLAS)) {
     //
-    // VK4XV (Bob) suggested
-    //   to have some "protection" for penelope systems which
-    //   start from a virgin props file, namely to auto-detect a penelope
-    //   and set the atlas_penelope flag so that the IQ samples are properly
-    //   scaled (otherwise full PA output power results).
+    // by default, assume there is a penelope board (no PennyLane)
+    // when using an ATLAS bus system, to avoid TX overdrive due to
+    // missing IQ scaling. Furthermore, piHPSDR assumes the presence
+    // of a Mercury board, so use that as the default clock source
+    // (until changed in the RADIO menu)
     //
-    // So my implementation works as follows:
-    //   To guard against "false penelope detects", the atlas_penelope flag
-    //   is initialized with 2 ("unknown").
-    //
-    //   This has no effect if a props file is already there and the flag is
-    //   read from the props file. The value 2 "unknown" can be changed
-    //   to either 0 or 1 in two situations:
-    //     - P1 analyzing the control flags and finding the penelope software version
-    //       is 18: change "unknown" to "penelope"
-    //     - radio menu is opened and penelope checkbox is to be displayed: change
-    //       "unknown" to "no penelope"
-    //
-    atlas_penelope=2;
+    atlas_penelope = 1;    		// TX present, do IQ scaling
+    atlas_clock_source_10mhz = 2;	// default: Mercury
+    atlas_clock_source_128mhz = 1;	// default: Mercury
+    atlas_mic_source = 1;               // default: Mic source = Penelope
   }
   // set the default power output and max drive value
   drive_max=100.0;
@@ -716,6 +710,9 @@ void start_radio() {
     case ORIGINAL_PROTOCOL:
       switch(device) {
         case DEVICE_METIS:
+#ifdef USBOZY
+	case DEVICE_OZY:
+#endif
           pa_power=PA_1W;
           break;
         case DEVICE_HERMES:
@@ -1078,6 +1075,9 @@ void start_radio() {
     case ORIGINAL_PROTOCOL:
       switch(device) {
         case DEVICE_METIS: // No support for multiple MERCURY cards on a single ATLAS bus.
+#ifdef USBOZY
+       case DEVICE_OZY:    // No support for multiple MERCURY cards on a single ATLAS bus.
+#endif
         case DEVICE_HERMES:
         case DEVICE_HERMES_LITE:
         case DEVICE_HERMES_LITE2:
@@ -1136,6 +1136,7 @@ void start_radio() {
   if ((protocol == ORIGINAL_PROTOCOL && device == DEVICE_HERMES_LITE2) ||
       (protocol == NEW_PROTOCOL && device == NEW_DEVICE_HERMES_LITE2))  {
     filter_board = N2ADR;
+    load_filters();  // Apply default OC settings for N2ADR board
   }
 
   if (protocol == ORIGINAL_PROTOCOL && device == DEVICE_STEMLAB) {
@@ -1426,6 +1427,12 @@ g_print("radio_change_receivers: from %d to %d\n",receivers,r);
 	gtk_fixed_put(GTK_FIXED(fixed),receiver[1]->panel,0,0);
 	set_displaying(receiver[1],1);
 	receivers=2;
+	//
+	// Make sure RX1 shares the sample rate  with RX0 when running P1.
+	//
+	if (protocol == ORIGINAL_PROTOCOL && receiver[1]->sample_rate != receiver[0]->sample_rate) {
+	    receiver_change_sample_rate(receiver[1],receiver[0]->sample_rate);
+	}
 	break;
   }
   reconfigure_radio();
@@ -2080,6 +2087,14 @@ g_print("radioRestoreState: %s\n",property_path);
     if(value) fft_size=atoi(value);
     value=getProperty("atlas_penelope");
     if(value) atlas_penelope=atoi(value);
+    value=getProperty("atlas_clock_source_10mhz");
+    if(value) atlas_clock_source_10mhz=atoi(value);
+    value=getProperty("atlas_clock_source_128mhz");
+    if(value) atlas_clock_source_128mhz=atoi(value);
+    value=getProperty("atlas_mic_source");
+    if(value) atlas_mic_source=atoi(value);
+    value=getProperty("atlas_janus");
+    if(value) atlas_janus=atoi(value);
     value=getProperty("tx_out_of_band");
     if(value) tx_out_of_band=atoi(value);
     value=getProperty("filter_board");
@@ -2440,6 +2455,14 @@ g_print("radioSaveState: %s\n",property_path);
     setProperty("fft_size",value);
     sprintf(value,"%d",atlas_penelope);
     setProperty("atlas_penelope",value);
+    sprintf(value,"%d",atlas_clock_source_10mhz);
+    setProperty("atlas_clock_source_10mhz",value);
+    sprintf(value,"%d",atlas_clock_source_128mhz);
+    setProperty("atlas_clock_source_128mhz",value);
+    sprintf(value,"%d",atlas_mic_source);
+    setProperty("atlas_mic_source",value);
+    sprintf(value,"%d",atlas_janus);
+    setProperty("atlas_janus",value);
     sprintf(value,"%d",filter_board);
     setProperty("filter_board",value);
     sprintf(value,"%d",tx_out_of_band);

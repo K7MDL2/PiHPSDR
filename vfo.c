@@ -147,6 +147,12 @@ void modesettings_save_state() {
     sprintf(name,"modeset.%d.step", i);
     sprintf(value,"%lld", mode_settings[i].step);
     setProperty(name,value);
+    sprintf(name,"modeset.%d.compressor_level", i);
+    sprintf(value,"%f", mode_settings[i].compressor_level);
+    setProperty(name,value);
+    sprintf(name,"modeset.%d.compressor", i);
+    sprintf(value,"%d", mode_settings[i].compressor);
+    setProperty(name,value);
   }
 }
 
@@ -176,6 +182,8 @@ void modesettings_restore_state() {
     mode_settings[i].rxeq[2]=0;
     mode_settings[i].rxeq[3]=0;
     mode_settings[i].step=100;
+    mode_settings[i].compressor=0;
+    mode_settings[i].compressor_level=0.0;
 
     sprintf(name,"modeset.%d.filter",i);
     value=getProperty(name);
@@ -231,6 +239,12 @@ void modesettings_restore_state() {
     sprintf(name,"modeset.%d.step",i);
     value=getProperty(name);
     if(value) mode_settings[i].step=atoll(value);
+    sprintf(name,"modeset.%d.compressor_level",i);
+    value=getProperty(name);
+    if (value) mode_settings[i].compressor_level=atof(value);
+    sprintf(name,"modeset.%d.compressor",i);
+    value=getProperty(name);
+    if (value) mode_settings[i].compressor=atoi(value);
   }
 }
 
@@ -281,7 +295,6 @@ void vfo_restore_state() {
   char *value;
 
   for(i=0;i<MAX_VFOS;i++) {
-g_print("vfo_restore_state: %d\n",i);
 
     vfo[i].band=band20;
     vfo[i].bandstack=0;
@@ -301,7 +314,6 @@ g_print("vfo_restore_state: %d\n",i);
     vfo[i].rit=0;
     vfo[i].ctun=0;
 
-g_print("vfo_restore_state: band=%d frequency=%lld\n",vfo[i].band,vfo[i].frequency);
 
     sprintf(name,"vfo.%d.band",i);
     value=getProperty(name);
@@ -354,40 +366,52 @@ void vfo_xvtr_changed() {
   }
 }
 
-void vfo_apply_mode_settings(int id) {
-  int m;
+void vfo_apply_mode_settings(RECEIVER *rx) {
+  int id,m;
 
+  id=rx->id;
   m=vfo[id].mode;
 
-  vfo[id].filter      =mode_settings[m].filter;
-  active_receiver->nr =mode_settings[m].nr;
-  active_receiver->nr2=mode_settings[m].nr2;
-  active_receiver->nb =mode_settings[m].nb;
-  active_receiver->nb2=mode_settings[m].nb2;
-  active_receiver->anf=mode_settings[m].anf;
-  active_receiver->snb=mode_settings[m].snb;
-  enable_rx_equalizer =mode_settings[m].en_rxeq;
-  rx_equalizer[0]     =mode_settings[m].rxeq[0];
-  rx_equalizer[1]     =mode_settings[m].rxeq[1];
-  rx_equalizer[2]     =mode_settings[m].rxeq[2];
-  rx_equalizer[3]     =mode_settings[m].rxeq[3];
-  enable_tx_equalizer =mode_settings[m].en_txeq;
-  tx_equalizer[0]     =mode_settings[m].txeq[0];
-  tx_equalizer[1]     =mode_settings[m].txeq[1];
-  tx_equalizer[2]     =mode_settings[m].txeq[2];
-  tx_equalizer[3]     =mode_settings[m].txeq[3];
-  step                =mode_settings[m].step;
+  vfo[id].filter       = mode_settings[m].filter;
+  rx->nr               = mode_settings[m].nr;
+  rx->nr2              = mode_settings[m].nr2;
+  rx->nb               = mode_settings[m].nb;
+  rx->nb2              = mode_settings[m].nb2;
+  rx->anf              = mode_settings[m].anf;
+  rx->snb              = mode_settings[m].snb;
+  enable_rx_equalizer  = mode_settings[m].en_rxeq;
+  rx_equalizer[0]      = mode_settings[m].rxeq[0];
+  rx_equalizer[1]      = mode_settings[m].rxeq[1];
+  rx_equalizer[2]      = mode_settings[m].rxeq[2];
+  rx_equalizer[3]      = mode_settings[m].rxeq[3];
+  step                 = mode_settings[m].step;
 
-  // make changes effective
+  //
+  // Transmitter-specific settings are only changed if this VFO
+  // controls the TX
+  //
+  if ((id == get_tx_vfo()) && can_transmit) {
+    enable_tx_equalizer  = mode_settings[m].en_txeq;
+    tx_equalizer[0]      = mode_settings[m].txeq[0];
+    tx_equalizer[1]      = mode_settings[m].txeq[1];
+    tx_equalizer[2]      = mode_settings[m].txeq[2];
+    tx_equalizer[3]      = mode_settings[m].txeq[3];
+
+    transmitter_set_compressor_level(transmitter, mode_settings[m].compressor_level);
+    transmitter_set_compressor      (transmitter, mode_settings[m].compressor      );
+  }
+  //
+  // make changes effective and put them on the VFO display
+  //
   g_idle_add(ext_update_noise, NULL);
   g_idle_add(ext_update_eq   , NULL);
+  g_idle_add(ext_vfo_update  , NULL);
 
 }
 
 void vfo_band_changed(int id,int b) {
   BANDSTACK *bandstack;
 
-  //fprintf(stderr,"%s: %d\n",__FUNCTION__,b);
 #ifdef CLIENT_SERVER
   if(radio_is_remote) {
     send_band(client_socket,id,b);
@@ -418,8 +442,6 @@ void vfo_band_changed(int id,int b) {
   vfo[id].mode=entry->mode;
   vfo[id].lo=band->frequencyLO+band->errorLO;
 
-  vfo_apply_mode_settings(id);
-
   // turn off ctun
   vfo[id].ctun=0;
   vfo[id].ctun_frequency=0LL;
@@ -430,10 +452,12 @@ void vfo_band_changed(int id,int b) {
   switch(id) {
     case 0:
       bandstack->current_entry=vfo[id].bandstack;
+      vfo_apply_mode_settings(receiver[0]);
       receiver_vfo_changed(receiver[0]);
       break;
    case 1:
       if(receivers==2) {
+        vfo_apply_mode_settings(receiver[1]);
         receiver_vfo_changed(receiver[1]);
       }
       break;
@@ -469,10 +493,12 @@ void vfo_bandstack_changed(int b) {
   switch(id) {
     case 0:
       bandstack->current_entry=vfo[id].bandstack;
+      vfo_apply_mode_settings(receiver[0]);
       receiver_vfo_changed(receiver[0]);
       break;
    case 1:
       if(receivers==2) {
+        vfo_apply_mode_settings(receiver[1]);
         receiver_vfo_changed(receiver[1]);
       }
       break;
@@ -492,15 +518,16 @@ void vfo_mode_changed(int m) {
 #endif
 
   vfo[id].mode=m;
-  vfo_apply_mode_settings(id);
 
   switch(id) {
     case 0:
+      vfo_apply_mode_settings(receiver[0]);
       receiver_mode_changed(receiver[0]);
       receiver_filter_changed(receiver[0]);
       break;
     case 1:
       if(receivers==2) {
+        vfo_apply_mode_settings(receiver[1]);
         receiver_mode_changed(receiver[1]);
         receiver_filter_changed(receiver[1]);
       }
@@ -580,7 +607,7 @@ void vfo_b_to_a() {
   vfo[VFO_A].rit=vfo[VFO_B].rit;
   vfo[VFO_A].lo=vfo[VFO_B].lo;
   vfo[VFO_A].offset=vfo[VFO_B].offset;
-
+  
   receiver_vfo_changed(receiver[0]);
   tx_vfo_changed();
   set_alex_antennas();  // This includes scheduling hiprio and general packets
@@ -1391,7 +1418,7 @@ void vfo_update() {
         cairo_destroy (cr);
         gtk_widget_queue_draw (vfo_panel);
     } else {
-fprintf(stderr,"vfo_update: no surface!\n");
+fprintf(stderr,"%s: no surface!\n",__FUNCTION__);
     }
 }
 
@@ -1405,8 +1432,6 @@ vfo_press_event_cb (GtkWidget *widget,
 }
 
 GtkWidget* vfo_init(int width,int height,GtkWidget *parent) {
-
-fprintf(stderr,"vfo_init: width=%d height=%d\n", width, height);
 
   parent_window=parent;
   my_width=width;

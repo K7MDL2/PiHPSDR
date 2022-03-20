@@ -505,6 +505,9 @@ static gboolean update_display(gpointer data) {
       case ORIGINAL_PROTOCOL:
         switch(device) {
           case DEVICE_METIS:
+#ifdef USBOZY
+	  case DEVICE_OZY:
+#endif
             constant1=3.3;
             constant2=0.09;
             break;
@@ -849,7 +852,7 @@ TRANSMITTER *create_transmitter(int id, int buffer_size, int fft_size, int fps, 
 
   tx->displaying=0;
   
-  tx->alex_antenna=ALEX_TX_ANTENNA_1;
+  tx->alex_antenna=0;  // default: ANT1
 
 fprintf(stderr,"create_transmitter: id=%d buffer_size=%d mic_sample_rate=%d mic_dsp_rate=%d iq_output_rate=%d output_samples=%d fps=%d width=%d height=%d\n",tx->id, tx->buffer_size, tx->mic_sample_rate, tx->mic_dsp_rate, tx->iq_output_rate, tx->output_samples,tx->fps,tx->width,tx->height);
 
@@ -1215,28 +1218,21 @@ static void full_tx_buffer(TRANSMITTER *tx) {
   if (isTransmitting()) {
 
     if(  (    (protocol == NEW_PROTOCOL && radio->device==NEW_DEVICE_ATLAS) 
+#ifdef USBOZY
+           || (protocol==ORIGINAL_PROTOCOL && radio->device==DEVICE_OZY)
+#endif
            || (protocol==ORIGINAL_PROTOCOL && radio->device==DEVICE_METIS)
          ) && atlas_penelope == 1) {
       //
       // Note that the atlas_penelope flag can have three values, namely
-      //   0 "no penelope"  : no scaling
+      //   0 "no penelope"  : no scaling 
       //   1 "penelope"     : scale
-      //   2 "unknown"      : no scaling
-      //
-      // Note "unknown" will be changed to "penelope" if P1 HPSDR packets are
-      // received and the penelope software version is 1.8. However, if it is a
-      // METIS system with a penelope software version different from 1.8, then
-      // the flag will remain in the "unknown" state.
-      //
-      // Note further, in the moment the radio menu is opened, "unknown" will be
-      // changed to "no penelope".
-      //
-      // This is so because some RedPitaya-based HPSDR servers identify as a
-      // METIS with penelope software version = 1.7
+      //   2 "pennylane"    : no scaling
       //
       // On Penelope boards, the TX drive level as reported by the P1 protocol has
       // no effect, and TX drive level changes are instead realized by
-      // scaling the TX IQ samples.
+      // scaling the TX IQ samples. Pennylane is a slightly updated Penelope board
+      // that has drive scaling just as Hermes and later.
       //
       // "The magic factor" 0.00392 is slightly less than 1/255.
       //
@@ -1501,7 +1497,7 @@ void add_mic_sample(TRANSMITTER *tx,float mic_sample) {
 //
 	cw_not_ready=1;
 	cw_key_up=0;
-	cw_key_down=0;
+	if (cw_key_down > 0) cw_key_down--;  // in case it occured before the RX/TX transition
 	cw_shape=0;
         // insert "silence" in CW audio and TX IQ buffers
   	cw_shape_buffer48[tx->samples]=0.0;
