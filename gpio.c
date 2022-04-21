@@ -70,10 +70,14 @@
 // Broadcom pins #9, 10, 11 are not used
 // by Controller1 and Controller2_V1
 // (and keep #2,3 reserved for I2C extensions)
+// For Controller2_V2 pins 9, 10, 11 are used by bottom encoders so conflict and the encoders won't work.  
+// Reassign these 3 pins to free pins.
+// If using dual encoders they usually do not have switches so can reuse those pins -  22,23,24 and 27.
+// Ideally this default assignment would be automatic based on controller version
 //
-int CWL_BUTTON=9;
-int CWR_BUTTON=11;
-int SIDETONE_GPIO=10;
+int CWL_BUTTON=22;
+int CWR_BUTTON=27;
+int SIDETONE_GPIO=25;
 int ENABLE_GPIO_SIDETONE=0;
 int ENABLE_CW_BUTTONS=1;
 int CW_ACTIVE_LOW=1;
@@ -138,7 +142,7 @@ int I2C_INTERRUPT=15;
 int monitor_lines[MAX_LINES];
 int lines=0;
 
-long settle_time=50;  // ms
+long settle_time=0;  // ms
 
 // VFO Encoder is always last
 
