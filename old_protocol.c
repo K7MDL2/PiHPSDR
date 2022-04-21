@@ -139,7 +139,6 @@ static int running;
 static long ep4_sequence;
 
 static uint32_t last_seq_num=-0xffffffff;
-static int suppress_ozy_packet = 0;
 static int tx_fifo_flag = 0;
 
 static int current_rx=0;
@@ -211,6 +210,21 @@ static unsigned char usb_buffer_block = 0;
 static GMutex dump_mutex;
 
 //
+// To avoid race conditions, we need a mutex covering the next three functions
+// that are called both by the RX and TX thread, and are filling and sending the
+// output buffer.
+//
+static pthread_mutex_t send_audio_mutex   = PTHREAD_MUTEX_INITIALIZER;
+
+//
+// This mutex "protects" ozy_send_buffer. This is necessary only for
+// TCP and USB-OZY since here the communication is a byte stream.
+//
+static pthread_mutex_t send_ozy_mutex   = PTHREAD_MUTEX_INITIALIZER;
+
+
+
+//
 // Ring buffer for outgoing samples.
 // Samples going to the radio are produces in big chunks.
 // The TX engine receives bunches of mic samples (e.g. 1024),
@@ -268,6 +282,11 @@ void dump_buffer(unsigned char *buffer,int length,const char *who) {
 }
 
 void old_protocol_stop() {
+  //
+  // Mutex is needed since in the TCP case, sending TX IQ packets
+  // must not occur while the "stop" packet is sent.
+  //
+  pthread_mutex_lock(&send_ozy_mutex);
 #ifdef USBOZY
   if(device!=DEVICE_OZY) {
 #endif
@@ -276,15 +295,14 @@ void old_protocol_stop() {
 #ifdef USBOZY
   }
 #endif
+  pthread_mutex_unlock(&send_ozy_mutex);
 }
 
 void old_protocol_run() {
-    //
-    // Several things done in metis_restart are also needed for
-    // USBOZY
-    //
     g_print("%s\n",__FUNCTION__);
+    pthread_mutex_lock(&send_ozy_mutex);
     metis_restart();
+    pthread_mutex_unlock(&send_ozy_mutex);
 }
 
 void old_protocol_set_mic_sample_rate(int rate) {
@@ -294,6 +312,7 @@ void old_protocol_set_mic_sample_rate(int rate) {
 void old_protocol_init(int rx,int pixels,int rate) {
   int i;
   g_print("old_protocol_init: num_hpsdr_receivers=%d\n",how_many_receivers());
+  pthread_mutex_lock(&send_ozy_mutex);
 
   old_protocol_set_mic_sample_rate(rate);
 
@@ -331,14 +350,15 @@ void old_protocol_init(int rx,int pixels,int rate) {
       exit( -1 );
     }
     g_print( "receive_thread: id=%p\n",receive_thread_id);
-
-    g_print("old_protocol_init: prime radio\n");
-    for(i=8;i<OZY_BUFFER_SIZE;i++) {
-      output_buffer[i]=0;
-    }
-
-    metis_restart();
   }
+
+  g_print("old_protocol_init: prime radio\n");
+  for(i=8;i<OZY_BUFFER_SIZE;i++) {
+    output_buffer[i]=0;
+  }
+
+  metis_restart();
+  pthread_mutex_unlock(&send_ozy_mutex);
 
 }
 
@@ -533,8 +553,6 @@ static gpointer receive_thread(gpointer arg) {
   g_print( "old_protocol: receive_thread\n");
   running=1;
 
-  //metis_restart();
-
   length=sizeof(addr);
   while(running) {
 
@@ -659,6 +677,9 @@ static int rx_feedback_channel() {
   switch (device) {
     case DEVICE_METIS:
     case DEVICE_HERMES_LITE:
+#ifdef USBOZY
+    case DEVICE_OZY:
+#endif
       ret=0;
       break;
     case DEVICE_HERMES:
@@ -690,6 +711,9 @@ static int tx_feedback_channel() {
   switch (device) {
     case DEVICE_METIS:
     case DEVICE_HERMES_LITE:
+#ifdef USBOZY
+    case DEVICE_OZY:
+#endif
       ret=1;
       break;
     case DEVICE_HERMES:
@@ -804,6 +828,19 @@ static int how_many_receivers() {
   int ret = receivers;   	// 1 or 2
   if (diversity_enabled) ret=2; // need both RX channels, even if there is only one RX
 
+#ifdef USBOZY
+  //
+  // Always return 2 so the number of HPSDR-RX is NEVER changed.
+  // With 2 RX you can do 1RX or 2RX modes, and it is
+  // also OK for doing PURESIGNAL on OZY.
+  // Rationale: Rick reported that OZY's tend to hang if the
+  //            number of receivers is changed while running.
+  // OK it wastes bandwidth and this might be a problem at higher
+  //    sample rates but this is simply safer.
+  //
+  if (device == DEVICE_OZY) return 2;
+#endif
+
 #ifdef PURESIGNAL
     // for PureSignal, the number of receivers needed is hard-coded below.
     // we need at least 2, and up to 5 for Orion2 boards. This is so because
@@ -813,6 +850,9 @@ static int how_many_receivers() {
     switch (device) {
       case DEVICE_METIS:
       case DEVICE_HERMES_LITE:
+#ifdef USBOZY
+      case DEVICE_OZY:
+#endif
 	ret=2;  // TX feedback hard-wired to RX2
 	break;
       case DEVICE_HERMES:
@@ -903,16 +943,6 @@ static void process_control_bytes() {
         if(penelope_software_version!=control_in[3]) {
           penelope_software_version=control_in[3];
           g_print("  Penelope Software version: %d (0x%0X)\n",penelope_software_version,penelope_software_version);
-        }
-        //
-        // Set atlas_penelope flag to "penelope" if three conditions are met:
-        // a) it's a METIS device (no HERMES, ORION, etc.)
-        // b) penelope software version is 18
-        // c) atlas_penelope flag is "unknown"
-        //
-        if (device == DEVICE_METIS && penelope_software_version == 18 && atlas_penelope == 2) {
-          g_print("Adjusted settings for PENELOPE\n");
-	  atlas_penelope=1;
         }
       }
       //
@@ -1196,38 +1226,43 @@ static void process_ozy_input_buffer(unsigned char  *buffer) {
         // ship out two buffers with 2*63 samples
         // the k-loop could be done with 1-2 memcpy
         //
-        for (int j=0; j<2; j++) {
-          unsigned char *p=output_buffer+8;
-          for (int k=0; k<63; k++) {
-            *p++ = TXRINGBUF[txring_outptr++];
-            *p++ = TXRINGBUF[txring_outptr++];
-            *p++ = TXRINGBUF[txring_outptr++];
-            *p++ = TXRINGBUF[txring_outptr++];
-            *p++ = TXRINGBUF[txring_outptr++];
-            *p++ = TXRINGBUF[txring_outptr++];
-            *p++ = TXRINGBUF[txring_outptr++];
-            *p++ = TXRINGBUF[txring_outptr++];
-            if (txring_outptr >= TXRINGBUFLEN) txring_outptr=0;
+        if (pthread_mutex_trylock(&send_ozy_mutex)) {
+	  //
+	  // This can only happen if the GUI thread initiates
+	  // a protocol stop/start sequence, as it does e.g.
+	  // when changing the number of receivers, changing
+	  // the sample rate, en/dis-abling PURESIGNAL or
+	  // DIVERSITY, or executing the RESTART button.
+	  // In these cases, the TX ring buffer is reset anywas
+	  // so we do not have to do anything here.
+	  //
+        } else {
+          for (int j=0; j<2; j++) {
+            unsigned char *p=output_buffer+8;
+            for (int k=0; k<63; k++) {
+              *p++ = TXRINGBUF[txring_outptr++];
+              *p++ = TXRINGBUF[txring_outptr++];
+              *p++ = TXRINGBUF[txring_outptr++];
+              *p++ = TXRINGBUF[txring_outptr++];
+              *p++ = TXRINGBUF[txring_outptr++];
+              *p++ = TXRINGBUF[txring_outptr++];
+              *p++ = TXRINGBUF[txring_outptr++];
+              *p++ = TXRINGBUF[txring_outptr++];
+              if (txring_outptr >= TXRINGBUFLEN) txring_outptr=0;
+            }
+            ozy_send_buffer();
           }
-          ozy_send_buffer();
-        }
-        micsamplecount=0;
+          micsamplecount=0;
+	  pthread_mutex_unlock(&send_ozy_mutex);
+	}
       }
     }
   }
 }
 
-//
-// To avoid race conditions, we need a mutex covering the next three functions
-// that are called both by the RX and TX thread, and are filling and sending the
-// output buffer.
-//
-
-static pthread_mutex_t send_buffer_mutex   = PTHREAD_MUTEX_INITIALIZER;
-
 void old_protocol_audio_samples(RECEIVER *rx,short left_audio_sample,short right_audio_sample) {
   if(!isTransmitting()) {
-    pthread_mutex_lock(&send_buffer_mutex);
+    pthread_mutex_lock(&send_audio_mutex);
     if (txring_flag) {
       //
       // First time we arrive here after a TX->RX transition:
@@ -1260,7 +1295,7 @@ void old_protocol_audio_samples(RECEIVER *rx,short left_audio_sample,short right
     TXRINGBUF[txring_inptr++]=0;
     TXRINGBUF[txring_inptr++]=0;
     if (txring_inptr >= TXRINGBUFLEN) txring_inptr=0;
-    pthread_mutex_unlock(&send_buffer_mutex);
+    pthread_mutex_unlock(&send_audio_mutex);
   }
 }
 
@@ -1273,7 +1308,7 @@ void old_protocol_audio_samples(RECEIVER *rx,short left_audio_sample,short right
 //
 void old_protocol_iq_samples_with_sidetone(int isample, int qsample, int side) {
   if(isTransmitting()) {
-    pthread_mutex_lock(&send_buffer_mutex);
+    pthread_mutex_lock(&send_audio_mutex);
     if (!txring_flag) {
       //
       // First time we arrive here after a RX->TX transition:
@@ -1299,13 +1334,13 @@ void old_protocol_iq_samples_with_sidetone(int isample, int qsample, int side) {
     TXRINGBUF[txring_inptr++]=qsample >> 8;
     TXRINGBUF[txring_inptr++]=qsample;
     if (txring_inptr >= TXRINGBUFLEN) txring_inptr=0;
-    pthread_mutex_unlock(&send_buffer_mutex);
+    pthread_mutex_unlock(&send_audio_mutex);
   }
 }
 
 void old_protocol_iq_samples(int isample,int qsample) {
   if(isTransmitting()) {
-    pthread_mutex_lock(&send_buffer_mutex);
+    pthread_mutex_lock(&send_audio_mutex);
     if (!txring_flag) {
       //
       // First time we arrive here after a RX->TX transition:
@@ -1324,7 +1359,7 @@ void old_protocol_iq_samples(int isample,int qsample) {
     TXRINGBUF[txring_inptr++]=qsample >> 8;
     TXRINGBUF[txring_inptr++]=qsample;
     if (txring_inptr >= TXRINGBUFLEN) txring_inptr=0;
-    pthread_mutex_unlock(&send_buffer_mutex);
+    pthread_mutex_unlock(&send_audio_mutex);
   }
 }
 
@@ -1348,7 +1383,7 @@ void ozy_send_buffer() {
   if(metis_offset==8) {
     //
     // Every second packet is a "C0=0" packet
-    // Unless USB device
+    // (for JANUS, *every* packet is a "C0=0" packet
     //
     output_buffer[C0]=0x00;
     output_buffer[C1]=0x00;
@@ -1375,25 +1410,61 @@ void ozy_send_buffer() {
     if (device == DEVICE_METIS)
 #endif
     {
-      // atlas_mic_source is FALSE when using Janus
+      //
+      // A. Assume a mercury board is *always* present (set CONFIG_MERCURY)
+      //
+      // B. Set CONFIG_PENELOPE in either of the cases
+      // - a penelope or pennylane TX is selected (atlas_penelope != 0)
+      // - a penelope is specified as mic source (atlas_mic_source != 0)
+      // - the penelope is the source for the 122.88 Mhz clock (atlas_clock_source_128mhz == 0)
+      // - the penelope is the source for the 10 Mhz reference (atlas_clock_source_10mhz == 1)
+      //
+      // So if neither penelope nor pennylane is selected but referenced as clock or mic source,
+      // a pennylane is chosen implicitly (not no drive level adjustment via IQ scaling in this case!)
+      // and CONFIG_BOTH becomes effective.
+      //
       
-      if (atlas_mic_source) {
-        output_buffer[C1] |= PENELOPE_MIC;
-        output_buffer[C1] |= CONFIG_BOTH;
+      output_buffer[C1] |= CONFIG_MERCURY;
+
+      if (atlas_penelope) {
+        output_buffer[C1] |= CONFIG_PENELOPE;
       }
 
-      if (atlas_clock_source_128mhz)
-        output_buffer[C1] |= MERCURY_122_88MHZ_SOURCE;
-      output_buffer[C1] |= ((atlas_clock_source_10mhz & 3) << 2);
+      if (atlas_mic_source) {
+        output_buffer[C1] |= PENELOPE_MIC;
+        output_buffer[C1] |= CONFIG_PENELOPE;
+      }
+
+      if (atlas_clock_source_128mhz) {
+        output_buffer[C1] |= MERCURY_122_88MHZ_SOURCE;	// Mercury provides 122 Mhz
+      } else {
+        output_buffer[C1] |= PENELOPE_122_88MHZ_SOURCE;	// Penelope provides 122 Mhz
+        output_buffer[C1] |= CONFIG_PENELOPE;
+      }
+      switch (atlas_clock_source_10mhz) {
+	case 0:
+	  output_buffer[C1] |= ATLAS_10MHZ_SOURCE;	// ATLAS provides 10 Mhz
+	  break;
+	case 1:
+	  output_buffer[C1] |= PENELOPE_10MHZ_SOURCE;	// Penelope provides 10 Mhz
+	  output_buffer[C1] |= CONFIG_PENELOPE;
+	  break;
+	case 2:
+	  output_buffer[C1] |= MERCURY_10MHZ_SOURCE;	// Mercury provides 10 MHz
+	  break;
+      }
    }
 
 #ifdef USBOZY
-    // check for Janus
-    if (device == DEVICE_OZY && !atlas_mic_source) {
+    //
+    // This is for "Janus only" operation
+    //
+    if (device == DEVICE_OZY && atlas_janus) {
       output_buffer[C2]=0x00;
       output_buffer[C3]=0x00;
       output_buffer[C4]=0x00;
       ozyusb_write(output_buffer,OZY_BUFFER_SIZE);
+      metis_offset=8;  // take care next packet is a C0=0 packet
       return;
     }
 #endif
@@ -2030,6 +2101,17 @@ static void ozyusb_write(unsigned char* buffer,int length)
       break;
   }
 */
+  //
+  // DL1YCF:
+  // Although the METIS offset is not used for OZY, we have to maintain it
+  // since it triggers the "alternating" sending of C0=0 and C0!=0
+  // C+C packets in ozy_send_buffer().
+  //
+  if (metis_offset == 8) {
+    metis_offset = 520;
+  } else {
+    metis_offset = 8;
+  }
 }
 #endif
 
@@ -2053,19 +2135,9 @@ static int metis_write(unsigned char ep,unsigned char* buffer,int length) {
     metis_buffer[6]=(send_sequence>>8)&0xFF;
     metis_buffer[7]=(send_sequence)&0xFF;
 
-    //
-    // When using UDP, the buffer will ALWAYS be sent. However, when using TCP,
-    // we must be able to suppress sending buffers HERE asynchronously
-    // when we want to sent a METIS start or stop packet. This is so because TCP
-    // is a byte stream, and data from two sources might end up interleaved
-    // In order not to confuse the SDR, we increase the sequence number only
-    // for packets actually sent.
-    //
-    if (!suppress_ozy_packet) {
-      // send the buffer
-      send_sequence++;
-      metis_send_buffer(&metis_buffer[0],1032);
-    }
+    send_sequence++;
+    metis_send_buffer(&metis_buffer[0],1032);
+
     metis_offset=8;
 
   }
@@ -2115,14 +2187,15 @@ static void metis_restart() {
   for (i=0; i<8; i++) {
     ozy_send_buffer();
   }
-
-  usleep(250000);
+  usleep(100000);
 
   // start the data flowing
+  // No mutex here, since metis_restart() is mutex protected
 #ifdef USBOZY
   if(device!=DEVICE_OZY) {
 #endif
     metis_start_stop(1);
+    usleep(100000);
 #ifdef USBOZY
   }
 #endif
@@ -2134,6 +2207,11 @@ static void metis_start_stop(int command) {
   unsigned char buffer[1032];
     
   g_print("%s: %d\n",__FUNCTION__,command);
+  //
+  // Clear TX IQ ring buffer
+  //
+  txring_inptr = 0;
+  txring_outptr = 0;
 #ifdef USBOZY
   if(device!=DEVICE_OZY)
   {
@@ -2156,7 +2234,6 @@ static void metis_start_stop(int command) {
     // Stop the sending of TX/audio packets (1032-byte-length) and wait a while
     // Then, send the start/stop buffer with a length of 1032
     //
-    suppress_ozy_packet=1;
     usleep(100000);
     for(i=4;i<1032;i++) {
       buffer[i]=0x00;
@@ -2167,7 +2244,6 @@ static void metis_start_stop(int command) {
     // This prevents mangling of data from TX/audio and Start/Stop packets.
     //
     usleep(100000);
-    suppress_ozy_packet=0;
   }
   if (command == 0 && tcp_socket >= 0) {
     // We just have sent a METIS stop in TCP

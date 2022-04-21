@@ -171,7 +171,7 @@ ENCODER encoders_controller2_v1[MAX_ENCODERS]={
   };
 
 ENCODER encoders_controller2_v2[MAX_ENCODERS]={
-  {TRUE,TRUE,5,1,6,1,0,RF_GAIN,R_START,TRUE,TRUE,26,1,20,1,0,AF_GAIN,R_START,TRUE,TRUE,22,MENU_BAND,0L},
+  {TRUE,TRUE,5,1,6,1,0,DRIVE,R_START,TRUE,TRUE,26,1,20,1,0,AF_GAIN,R_START,TRUE,TRUE,22,MENU_BAND,0L},
   {TRUE,TRUE,9,1,7,1,0,ATTENUATION,R_START,TRUE,TRUE,21,1,4,1,0,AGC_GAIN,R_START,TRUE,TRUE,27,MENU_MODE,0L},
   {TRUE,TRUE,11,1,10,1,0,IF_WIDTH,R_START,TRUE,TRUE,19,1,16,1,0,IF_SHIFT,R_START,TRUE,TRUE,23,MENU_FILTER,0L},
   {TRUE,TRUE,13,1,12,1,0,XIT,R_START,TRUE,TRUE,8,1,25,1,0,RIT,R_START,TRUE,TRUE,24,MENU_FREQUENCY,0L},
@@ -353,7 +353,7 @@ static void initialiseEpoch() {
   epochMilli = (uint64_t)ts.tv_sec * (uint64_t)1000    + (uint64_t)(ts.tv_nsec / 1000000L) ;
 }
 
-unsigned int millis () {
+static unsigned int millis () {
   uint64_t now ;
   struct  timespec ts ;
   clock_gettime (CLOCK_MONOTONIC_RAW, &ts) ;
@@ -514,7 +514,7 @@ static void process_encoder(int e,int l,int addr,int val) {
   g_mutex_unlock(&encoder_mutex);
 }
 
-static void process_edge(int offset, enum ACTION_MODE value) {
+static void process_edge(int offset,int value) {
   gint i;
   unsigned int t;
   gboolean found;
@@ -556,6 +556,7 @@ static void process_edge(int offset, enum ACTION_MODE value) {
       found=TRUE;
       break;
     } else if(encoders[i].switch_enabled && encoders[i].switch_address==offset) {
+      //g_print("%s: found %d encoder %d switch\n",__FUNCTION__,offset,i);
       t=millis();
       //g_print("%s: found %d encoder %d switch value=%d t=%u\n",__FUNCTION__,offset,i,value,t);
       if (t<encoders[i].switch_debounce) {

@@ -343,7 +343,7 @@ int cw_audio_write(RECEIVER *rx,float sample) {
   int result=0;
   int rc;
   int err;
-
+  
   g_mutex_lock(&rx->local_audio_mutex);
 
   if (rx->playstream != NULL && rx->local_audio_buffer != NULL) {

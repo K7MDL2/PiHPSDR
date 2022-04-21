@@ -78,7 +78,6 @@ ACTION_TABLE ActionTable[] = {
   {COMPRESSION,		"COMPRESSION",		NULL,		MIDI_KNOB | MIDI_WHEEL | CONTROLLER_ENCODER},
   {CTUN,		"CTUN",			"CTUN",		MIDI_KEY | CONTROLLER_SWITCH},
   {CW_FREQUENCY,	"CW FREQUENCY",		NULL,		MIDI_KNOB | MIDI_WHEEL | CONTROLLER_ENCODER},
-  {CW_KEYER,            "CW(keyer)",            NULL,           MIDI_KEY | CONTROLLER_SWITCH},
   {CW_LEFT,		"CW LEFT",		"CWL",		MIDI_KEY | CONTROLLER_SWITCH},
   {CW_RIGHT,		"CW RIGHT",		"CWR",		MIDI_KEY | CONTROLLER_SWITCH},
   {CW_SPEED,		"CW SPEED",		NULL,		MIDI_KNOB | MIDI_WHEEL | CONTROLLER_ENCODER},
@@ -181,6 +180,17 @@ ACTION_TABLE ActionTable[] = {
   {ZOOM,		"ZOOM",			NULL,		MIDI_WHEEL | CONTROLLER_ENCODER},
   {ZOOM_MINUS,		"ZOOM -",		"ZOOM-",	MIDI_KEY | CONTROLLER_SWITCH},
   {ZOOM_PLUS,		"ZOOM +",		"ZOOM+",	MIDI_KEY | CONTROLLER_SWITCH},
+//
+// The following actions support external CW keyers generating
+// the following messages:
+//
+// CW Keydown (MIDI and GPIO)
+// CW speed   (only MIDI)
+// CW side tone frequency (only MIDI)
+//
+  {CW_KEYER_KEYDOWN,    "CW Key\n(keyer)",      NULL,           MIDI_KEY | CONTROLLER_SWITCH},
+  {CW_KEYER_SPEED,      "CW Speed\n(keyer)",    NULL,           MIDI_KNOB},
+  {CW_KEYER_SIDETONE,   "CW pitch\n(keyer)",    NULL,           MIDI_KNOB},
   {ACTIONS,		"",			NULL,		TYPE_NONE}
 };
 
@@ -237,18 +247,18 @@ void schedule_action(enum ACTION action, enum ACTION_MODE mode, gint val) {
     case CW_LEFT:
     case CW_RIGHT:
 #ifdef LOCALCW
-      keyer_event(action==CW_LEFT,val);
+      keyer_event(action==CW_LEFT,mode==PRESSED);
 #else
       g_print("CW_Left/Right but compiled without LOCALCW\n");
 #endif
       break;
-    case CW_KEYER:
+    case CW_KEYER_KEYDOWN:
       //
       // hard "key-up/down" action WITHOUT break-in
       // intended for external keyers (MIDI or GPIO connected)
       // which take care of PTT themselves
       //
-      if (val != 0 && cw_keyer_internal == 0) {
+      if (mode==PRESSED && cw_keyer_internal==0) {
         cw_key_down=960000;  // max. 20 sec to protect hardware
         cw_key_up=0;
         cw_key_hit=1;
@@ -290,7 +300,7 @@ int process_action(void *data) {
       }
       break;
     case AF_GAIN:
-      value=KnobOrWheel(a, active_receiver->volume, 0.0, 1.0, 0.02);
+      value=KnobOrWheel(a, active_receiver->volume, 0.0, 1.0, 0.03);
       set_af_gain(active_receiver->id,value);
       break;
     case AF_GAIN_RX1:
@@ -536,6 +546,7 @@ int process_action(void *data) {
     case COMP_ENABLE:
       if(can_transmit && a->mode==PRESSED) {
         transmitter_set_compressor(transmitter,transmitter->compressor?FALSE:TRUE);
+	mode_settings[transmitter->mode].compressor=transmitter->compressor;
       }
       break;
     case COMPRESSION:
@@ -543,6 +554,8 @@ int process_action(void *data) {
         value=KnobOrWheel(a, transmitter->compressor_level, 0.0, 20.0, 1.0);
         transmitter_set_compressor_level(transmitter,value);
         transmitter_set_compressor(transmitter, value > 0.5);
+	mode_settings[transmitter->mode].compressor=transmitter->compressor;
+	mode_settings[transmitter->mode].compressor_level=transmitter->compressor_level;
         g_idle_add(ext_vfo_update, NULL);
       }
       break;
@@ -558,13 +571,18 @@ int process_action(void *data) {
       }
       break;
     case CW_FREQUENCY:
-      value=KnobOrWheel(a, (double)cw_keyer_sidetone_frequency, 400.0, 1000.0, 10.0);
+      value=KnobOrWheel(a, (double)cw_keyer_sidetone_frequency, 300.0, 1000.0, 10.0);
       cw_keyer_sidetone_frequency=(int)value;
+      receiver_filter_changed(active_receiver);
+      // we may omit the P2 high-prio packet since this is sent out at regular intervals
       g_idle_add(ext_vfo_update,NULL);
       break;
     case CW_SPEED:
       value=KnobOrWheel(a, (double)cw_keyer_speed, 1.0, 60.0, 1.0);
       cw_keyer_speed=(int)value;
+#ifdef LOCALCW
+      keyer_update();
+#endif
       g_idle_add(ext_vfo_update,NULL);
       break;
     case DIV:
@@ -1207,6 +1225,36 @@ int process_action(void *data) {
     case ZOOM_PLUS:
       if(a->mode==PRESSED) {
         update_zoom(+1);
+      }
+      break;
+
+    case CW_KEYER_SPEED:
+      if (a->mode==ABSOLUTE) {
+        //
+        // The MIDI message contains the speed as a value between 1 and 127,
+        // however the range 0-127 is internally converted to 0-100 upstream
+        //
+        cw_keyer_speed=(127*a->val + 50)/100;
+        if (cw_keyer_speed <  1) cw_keyer_speed=1;
+        if (cw_keyer_speed > 99) cw_keyer_speed=99;
+#ifdef LOCALCW
+        keyer_update();
+#endif
+        g_idle_add(ext_vfo_update,NULL);
+      }
+      break;
+
+    case CW_KEYER_SIDETONE:
+      if (a->mode==ABSOLUTE) {
+        //
+        // The MIDI keyer messages contains the frequency (in multiples of 10 Hz)
+        // as a value between 0 and 127 (thus encoding frequencies from 0 to 1270 Hz).
+        // however the range 0-127 is internally converted to 0-100 upstream
+        //
+        cw_keyer_sidetone_frequency=10*((127*a->val+50)/100);
+        receiver_filter_changed(active_receiver);
+        // we may omit the P2 high-prio packet since this is sent out at regular intervals
+        g_idle_add(ext_vfo_update,NULL);
       }
       break;
 

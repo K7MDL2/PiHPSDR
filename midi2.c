@@ -41,9 +41,9 @@ void NewMidiEvent(enum MIDIevent event, int channel, int note, int val) {
     double now;          // used in debug code
 
 //Un-comment next three lines to get a log of incoming MIDI messages
-//clock_gettime(CLOCK_MONOTONIC, &ts);
-//now=ts.tv_sec + 1E-9*ts.tv_nsec;
-//g_print("%s:%12.3f:EVENT=%d CHAN=%d NOTE=%d VAL=%d\n",__FUNCTION__,now,event,channel,note,val);
+clock_gettime(CLOCK_MONOTONIC, &ts);
+now=ts.tv_sec + 1E-9*ts.tv_nsec;
+g_print("%s:%12.3f:EVENT=%d CHAN=%d NOTE=%d VAL=%d\n",__FUNCTION__,now,event,channel,note,val);
 
     if (event == MIDI_PITCH) {
 	desc=MidiCommandsTable[128];
@@ -220,7 +220,6 @@ static OLD_MAPPING OLD_Mapping[] = {
 	{ CTUN,  		"CTUN"			},
 	{ VFO,			"CURRVFO"		},
 	{ CW_LEFT,		"CWL"			},
-	{ CW_KEYER,		"CW(Keyer)"		},
 	{ CW_RIGHT,		"CWR"			},
 	{ CW_SPEED,		"CWSPEED"		},
 	{ DIV_GAIN_COARSE,	"DIVCOARSEGAIN"		},
@@ -284,6 +283,9 @@ static OLD_MAPPING OLD_Mapping[] = {
 	{ ZOOM,			"ZOOM"			},
 	{ ZOOM_MINUS,		"ZOOMDOWN"		},
 	{ ZOOM_PLUS,		"ZOOMUP"		},
+        { CW_KEYER_KEYDOWN,     "KEYER-CW"              },
+        { CW_KEYER_SPEED,       "KEYER-SPEED"           },
+        { CW_KEYER_SIDETONE,    "KEYER-SIDETONE"        },
         { NO_ACTION,  		"NONE"			}
 };
 

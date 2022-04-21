@@ -30,6 +30,18 @@
 #include <pthread.h>
 #include <alsa/asoundlib.h>
 
+//extern int cw_keys_reversed; // 0=disabled 1=enabled
+extern int cw_keyer_speed; // 1-60 WPM
+//extern int cw_keyer_mode;
+//extern int cw_keyer_weight; // 0-100
+//extern int cw_keyer_spacing; // 0=on 1=off
+//extern int cw_keyer_internal; // 0=external 1=internal
+extern int cw_keyer_sidetone_volume; // 0-127
+//extern int cw_keyer_ptt_delay; // 0-255ms
+//extern int cw_keyer_hang_time; // ms
+extern int cw_keyer_sidetone_frequency; // Hz
+//extern int cw_breakin; // 0=disabled 1=enabled
+
 MIDI_DEVICE midi_devices[MAX_MIDI_DEVICES];
 int n_midi_devices;
 
@@ -40,6 +52,7 @@ int n_midi_devices;
 static pthread_t midi_thread_id[MAX_MIDI_DEVICES];
 static char *midi_port[MAX_MIDI_DEVICES];
 static snd_rawmidi_t *midi_input[MAX_MIDI_DEVICES];
+static snd_rawmidi_t *midi_output[MAX_MIDI_DEVICES];
 
 static void* midi_thread(void *);
 
@@ -65,6 +78,7 @@ void configure_midi_device(gboolean state) {
 static void *midi_thread(void *arg) {
     int index = (int) arg;
     snd_rawmidi_t *input=midi_input[index];
+    snd_rawmidi_t *output=midi_output[index];
     char *port=midi_port[index];
 
     int ret;
@@ -75,13 +89,72 @@ static void *midi_thread(void *arg) {
     unsigned short revents;
     int i;
     int chan,arg1,arg2;
-    
-    
+    unsigned char lsb_val, msb_val;
+    char midi_cmd[3];
+    static int last_cw_keyer_speed = 0;
+    static int last_cw_keyer_sidetone_volume = 0;
+    static int last_cw_keyer_sidetone_frequency = 0;
 
     npfds = snd_rawmidi_poll_descriptors_count(input);
     pfds = alloca(npfds * sizeof(struct pollfd));
     snd_rawmidi_poll_descriptors(input, pfds, npfds);
     for (;;) {
+	
+	// Check if any Keyer config paramters ahve changed and send MIDI commands to update the keyer
+	// Send ctl_chg, on Ch1 for K3NG keyer.
+	// 0 is first byte for 16 bit double commands
+	// 4 is Keyer Speed		    // 1 byte cmd
+	// 5 is Sidetone Volume 	// 2nd byte double cmd
+	// 6 is Sidetone Frequency  // 2nd byte double cmd
+	// 16 is Audio Volume		// 2nd byte double cmd
+	    
+	if(cw_keyer_speed != last_cw_keyer_speed) {
+	    last_cw_keyer_speed = cw_keyer_speed;
+	    //CW Speed #4	    
+        sprintf(midi_cmd, "%c%c%c", 177, 4, (char)last_cw_keyer_speed); 
+	    snd_rawmidi_write(output,&midi_cmd,3);	    
+        g_print("%s: Sending MIDI Speed Cmd to Keyer: Evt:0x%02hX Chan:0x%02hX Note:0x%02hX Last:%d\n",__FUNCTION__, 177, 4, last_cw_keyer_speed, last_cw_keyer_speed);
+	}
+	if(cw_keyer_sidetone_volume != last_cw_keyer_sidetone_volume) {
+	    last_cw_keyer_sidetone_volume = cw_keyer_sidetone_volume;
+	    // Set Sidetone Level #5 - Teensy side divides value sent by 16384 and needs 0 to 1.0 at the end.
+	    // our range is 0 to 127 so lsb will always be 0.  Meed to scale 0 to 127 to 0 to 16384
+        // 128 is technically correct number but is too loud. 16 seems to work best. 
+	    unsigned int val = (cw_keyer_sidetone_volume * 16);       
+        lsb_val = (unsigned char) ( val & 0xFF);
+        msb_val = (unsigned char) ((val >> 7) & 0x7F);  // The Teensy code is ony shifting 7 bits not 8.
+        
+	    g_print("%s: Evt:%02hX MSB: %02hX LSB: %02hX Val: %d\n", __FUNCTION__, 177, msb_val, lsb_val, last_cw_keyer_sidetone_volume);
+	    // Send the expected 16bit value with lsb first
+        sprintf(midi_cmd, "%c%c%c", 177, 0, (char)lsb_val); 
+	    snd_rawmidi_write(output,&midi_cmd,3);
+	    g_print("%s: Sending MIDI Sidetone Level Cmd msb to Keyer: Evt:0x%02hX Chan:0x%02hX Note:0x%02hX Last:%d\n",__FUNCTION__, 177, 0, msb_val, last_cw_keyer_sidetone_volume);
+	    sprintf(midi_cmd, "%c%c%c", 177, 5, (char)msb_val); 
+	    snd_rawmidi_write(output,&midi_cmd,3);
+	    g_print("%s: Sending MIDI Sidetone Level Cmd lsb to Keyer: Evt:0x%02hX Chan:0x%02hX Note:0x%02hX Last:%d\n",__FUNCTION__, 177, 5, lsb_val, last_cw_keyer_sidetone_volume);
+	}
+	if(cw_keyer_sidetone_frequency != last_cw_keyer_sidetone_frequency) {
+	    last_cw_keyer_sidetone_frequency = cw_keyer_sidetone_frequency;
+	    // Sidetone Pitch #6 - 100 to 1000 for piHPSDR CW menu range
+	    //unsigned int val = (last_cw_keyer_sidetone_frequency); 
+	    //val = val/127; // 1000/7 = 0 to 127	    
+        //msb_val = (char) (val << 8) & 0xFF00;
+	    //msb_val = (char) (val & 0xFF00);
+        //g_print("%s: Val: %d\n", __FUNCTION__, val); 
+        lsb_val = (unsigned char)  (last_cw_keyer_sidetone_frequency & 0xFF);
+        msb_val = (unsigned char) ((last_cw_keyer_sidetone_frequency >> 7) & 0x7F);
+        
+        g_print("%s: Evt:%02hX MSB: %02hX LSB: %02hX Val: %d\n", __FUNCTION__, 177, msb_val, lsb_val, last_cw_keyer_sidetone_frequency);
+        // Send the expected 16bit value with msb first then lsb
+        sprintf(midi_cmd, "%c%c%c", 177, 0, (char)lsb_val); 
+	    snd_rawmidi_write(output,&midi_cmd,3);
+        g_print("%s: Sending MIDI Sidetone Pitch Cmd msb to Keyer: Evt:0x%02hX Chan:0x%02hX Note:0x%02hX Last:%d\n",__FUNCTION__, 177, 0, msb_val, last_cw_keyer_sidetone_frequency);
+        sprintf(midi_cmd, "%c%c%c", 177, 6, (char)msb_val); 
+	    snd_rawmidi_write(output,&midi_cmd,3);
+        g_print("%s: Sending MIDI Sidetone Pitch Cmd lsb to Keyer: Evt:0x%02hX Chan:0x%02hX Note:0x%02hX Last:%d\n",__FUNCTION__, 177, 6, lsb_val, last_cw_keyer_sidetone_frequency);
+	}
+	// Continue on with RX events    
+    
 	ret = poll(pfds, npfds, 250);
         if (!midi_devices[index].active) break;
 	if (ret < 0) {
@@ -90,6 +163,7 @@ static void *midi_thread(void *arg) {
 	    usleep(250000);
 	}
 	if (ret <= 0) continue;  // nothing arrived, do next poll()
+	
 	if ((ret = snd_rawmidi_poll_descriptors_revents(input, pfds, npfds, &revents)) < 0) {
             fprintf(stderr,"cannot get poll events: %s\n", snd_strerror(errno));
             continue;
@@ -199,11 +273,12 @@ void register_midi_device(int index) {
 
     g_print("%s: open MIDI device %d\n", __FUNCTION__, index);
 
-    if ((ret = snd_rawmidi_open(&midi_input[index], NULL, midi_port[index], SND_RAWMIDI_NONBLOCK)) < 0) {
+    if ((ret = snd_rawmidi_open(&midi_input[index], &midi_output[index], midi_port[index], SND_RAWMIDI_NONBLOCK)) < 0) {
         fprintf(stderr,"cannot open port \"%s\": %s\n", midi_port[index], snd_strerror(ret));
         return;
     }
     snd_rawmidi_read(midi_input[index], NULL, 0); /* trigger reading */
+    //snd_rawmidi_read(midi_output[index], NULL, 0); /* trigger writing */
 
 
     ret = pthread_create(&midi_thread_id[index], NULL, midi_thread, (void *) index);
